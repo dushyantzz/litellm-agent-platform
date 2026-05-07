@@ -2,8 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -92,14 +91,7 @@ export default function AgentDetailPage({ params }: PageProps) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-8">
-      <div className="flex items-center justify-between">
-        <Link
-          href="/agents"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="size-3.5" />
-          Back to agents
-        </Link>
+      <div className="flex items-center justify-end">
         <Button
           variant="outline"
           size="sm"
