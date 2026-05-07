@@ -60,54 +60,51 @@ export function Sidebar() {
 
   return (
     <aside
-      className="sticky top-0 flex h-screen w-[240px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+      className="sticky top-0 flex h-screen w-[220px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
       aria-label="Primary sidebar"
     >
       {/* Wordmark */}
-      <div className="flex flex-col gap-0.5 px-4 pt-4 pb-3">
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
         <Link
           href="/"
           aria-label="LiteLLM Agent Platform home"
-          className="inline-flex shrink-0 items-center gap-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <span
             aria-hidden
-            className="grid h-5 w-5 place-items-center rounded-[5px] bg-foreground text-[10px] font-semibold tracking-tight text-background"
+            className="grid h-[18px] w-[18px] place-items-center rounded-[4px] bg-foreground text-[9px] font-semibold tracking-tight text-background"
           >
             L
           </span>
-          <span className="text-[15px] font-semibold tracking-tight text-foreground">
+          <span className="text-[13px] font-semibold tracking-tight text-foreground">
             LiteLLM
           </span>
         </Link>
-        <span className="ml-7 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Agent Platform
-        </span>
       </div>
 
-      {/* Collapse + Search row */}
-      <div className="flex items-center gap-2 px-3 pb-2">
+      {/* Search row */}
+      <div className="flex items-center gap-1.5 px-3 pb-2">
         <button
           type="button"
           aria-label="Collapse sidebar"
           title="Collapse sidebar (coming soon)"
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <PanelLeft className="size-4" aria-hidden />
+          <PanelLeft className="size-3.5" aria-hidden />
         </button>
         <div
-          className="flex flex-1 items-center gap-2 rounded-md border border-sidebar-border px-2 py-1.5 text-xs text-muted-foreground"
+          className="flex flex-1 items-center gap-1.5 rounded-md border border-sidebar-border px-2 py-1 text-[11px] text-muted-foreground"
           aria-hidden
         >
-          <Search className="size-3.5" />
+          <Search className="size-3" />
           <span className="flex-1">Search</span>
-          <kbd className="font-sans text-[11px] tabular-nums">⌘K</kbd>
+          <kbd className="font-sans text-[10px] tabular-nums">⌘K</kbd>
         </div>
       </div>
 
       {/* Primary nav */}
       <nav aria-label="Primary navigation" className="flex-1 overflow-y-auto px-2 pt-1">
-        <ul className="space-y-0.5">
+        <ul className="space-y-px">
           {NAV.map(({ href, label, Icon, isActive }) => {
             const active = isActive(pathname);
             return (
@@ -116,7 +113,7 @@ export function Sidebar() {
                   href={href}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "relative flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    "relative flex h-7 items-center gap-2 rounded-md px-2 text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     active
                       ? "bg-sidebar-accent text-foreground"
                       : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
@@ -124,7 +121,7 @@ export function Sidebar() {
                 >
                   <Icon
                     className={cn(
-                      "size-4 shrink-0",
+                      "size-[14px] shrink-0",
                       active ? "text-foreground" : "text-muted-foreground",
                     )}
                     aria-hidden
@@ -138,17 +135,17 @@ export function Sidebar() {
       </nav>
 
       {/* Sticky footer */}
-      <div className="sticky bottom-0 flex items-center gap-1 border-t border-sidebar-border bg-sidebar px-3 py-2">
+      <div className="sticky bottom-0 flex items-center gap-0.5 border-t border-sidebar-border bg-sidebar px-2 py-1.5">
         <ThemeToggle />
         <a
           href={REPO_URL}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="View repository on GitHub"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <svg
-            className="size-4"
+            className="size-3.5"
             viewBox="0 0 24 24"
             fill="currentColor"
             aria-hidden
