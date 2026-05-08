@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, ChevronRight, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 
 import { AgentAvatar } from "@/components/agent-avatar";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -195,18 +195,6 @@ export function Sidebar() {
             LiteLLM Agent Platform
           </span>
         </Link>
-      </div>
-
-      {/* Search row */}
-      <div className="flex items-center gap-1.5 px-3 pb-2">
-        <div
-          className="flex flex-1 items-center gap-1.5 rounded-md border border-sidebar-border px-2 py-1 text-[11px] text-muted-foreground"
-          aria-hidden
-        >
-          <Search className="size-3" />
-          <span className="flex-1">Search</span>
-          <kbd className="font-sans text-[10px] tabular-nums">⌘K</kbd>
-        </div>
       </div>
 
       {/* New Agent CTA */}
