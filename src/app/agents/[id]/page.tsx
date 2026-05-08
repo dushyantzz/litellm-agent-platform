@@ -304,6 +304,27 @@ export default function AgentDetailPage({ params }: PageProps) {
               <dt className="text-muted-foreground">Branch</dt>
               <dd className="font-mono text-[13px]">{agent.branch}</dd>
 
+              <dt className="text-muted-foreground">MCP servers</dt>
+              <dd>
+                {agent.mcp_servers && agent.mcp_servers.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {agent.mcp_servers.map((id) => (
+                      <Badge
+                        key={id}
+                        variant="outline"
+                        className="font-mono text-[11px]"
+                      >
+                        {id}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-[13px] text-muted-foreground">
+                    None
+                  </span>
+                )}
+              </dd>
+
               <dt className="text-muted-foreground">Agent ID</dt>
               <dd className="font-mono text-[12px] text-muted-foreground break-all">
                 {agent.id}

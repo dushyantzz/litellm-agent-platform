@@ -6,8 +6,7 @@ import { Check, Copy, Loader2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   ApiError,
-  getApiKey,
-  getProxyBase,
+  getPublicProxyBase,
   harnessResponseText,
   sendMessage,
   spawnSession,
@@ -231,10 +230,6 @@ interface RunResult {
   sessionId?: string;
 }
 
-const NEEDS_KEY_PROMPT =
-  "Set your LITELLM_API_KEY first — open the browser console and run " +
-  "localStorage.setItem('LITELLM_API_KEY', 'sk-...').";
-
 export function CallAgentSnippets({ agentId }: CallAgentSnippetsProps) {
   const [lang, setLang] = useState<Lang>("curl");
   const [base, setBase] = useState<string>("http://localhost:4000");
@@ -243,10 +238,15 @@ export function CallAgentSnippets({ agentId }: CallAgentSnippetsProps) {
     startedAt: 0,
     elapsedSec: 0,
   });
-  const [keyMissing, setKeyMissing] = useState(false);
 
   useEffect(() => {
-    setBase(getProxyBase());
+    let cancelled = false;
+    void getPublicProxyBase().then((b) => {
+      if (!cancelled && b) setBase(b);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Tick a 1s elapsed counter while the run is in flight so the user has
@@ -267,12 +267,6 @@ export function CallAgentSnippets({ agentId }: CallAgentSnippetsProps) {
 
   async function handleTry() {
     if (run.phase === "spawning" || run.phase === "asking") return;
-    const key = getApiKey();
-    if (!key) {
-      setKeyMissing(true);
-      return;
-    }
-    setKeyMissing(false);
     const startedAt = Date.now();
     setRun({
       phase: "spawning",
@@ -408,11 +402,6 @@ export function CallAgentSnippets({ agentId }: CallAgentSnippetsProps) {
         </div>
       </div>
 
-      {keyMissing ? (
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-          {NEEDS_KEY_PROMPT}
-        </div>
-      ) : null}
 
       {(run.phase === "spawning" ||
         run.phase === "asking" ||
@@ -491,8 +480,9 @@ export function CallAgentSnippets({ agentId }: CallAgentSnippetsProps) {
         <span className="font-mono">message</span> (or stream{" "}
         <span className="font-mono">events</span>) → repeat. The{" "}
         <span className="font-medium">Try it</span> button runs steps 1 + 2
-        against this proxy using your locally-stored{" "}
-        <span className="font-mono">LITELLM_API_KEY</span>.
+        against this proxy using the server-side{" "}
+        <span className="font-mono">LITELLM_API_KEY</span> — the key never
+        ships to the browser.
       </p>
     </section>
   );
