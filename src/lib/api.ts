@@ -167,6 +167,12 @@ export interface SessionRow {
   task_arn?: string | null;
   response?: HarnessMessageResponse | null;
   created_at?: string | null;
+  // Last user-message activity (ISO 8601). Null until the first message
+  // bumps it; UI falls back to `created_at` for the idle countdown.
+  last_seen_at?: string | null;
+  // Idle window after which the reconciler reaps a `ready` sandbox. Sent
+  // by the backend so the UI doesn't hardcode SESSION_IDLE_TIMEOUT_MS.
+  idle_timeout_ms?: number;
 }
 
 /**

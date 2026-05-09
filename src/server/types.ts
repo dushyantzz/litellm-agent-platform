@@ -85,6 +85,13 @@ export interface ApiSession {
   task_arn: string | null;
   response: HarnessMessageResponse | null;
   created_at: string;
+  // Last user message activity. Null until the first POST /message bumps it;
+  // the UI falls back to `created_at` for the idle countdown when null.
+  last_seen_at: string | null;
+  // Idle window after which the reconciler reaps a `ready` sandbox. Sent
+  // alongside last_seen_at so the UI shows an accurate countdown without
+  // hardcoding the constant.
+  idle_timeout_ms: number;
 }
 
 export interface ApiDockerfile {
@@ -277,6 +284,8 @@ export function toApiSession(
         ? (row.response as HarnessMessageResponse)
         : null),
     created_at: row.created_at.toISOString(),
+    last_seen_at: row.last_seen_at ? row.last_seen_at.toISOString() : null,
+    idle_timeout_ms: SESSION_IDLE_TIMEOUT_MS,
   };
 }
 

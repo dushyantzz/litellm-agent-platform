@@ -79,6 +79,35 @@ function mapHarnessMessages(msgs: HarnessMessage[]): LocalMessage[] {
 
 const POLL_INTERVAL_MS = 5000;
 const NEAR_BOTTOM_PX = 200;
+const COUNTDOWN_TICK_MS = 30_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+// Render the idle-reap countdown for a `ready` sandbox. Reconciler reaps
+// `ready` sessions that haven't had message activity within
+// `idle_timeout_ms` (24h by default). Returns null when the session isn't
+// active, so callers can skip rendering entirely.
+function formatExpiresIn(
+  session: SessionRow | null,
+  nowMs: number,
+): string | null {
+  if (!session || session.status !== "ready") return null;
+  const lastSeenIso = session.last_seen_at ?? session.created_at;
+  if (!lastSeenIso) return null;
+  const lastSeenMs = Date.parse(lastSeenIso);
+  if (Number.isNaN(lastSeenMs)) return null;
+  const idleMs = session.idle_timeout_ms ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const remainingMs = lastSeenMs + idleMs - nowMs;
+  if (remainingMs <= 0) return "expiring now";
+  const totalMin = Math.floor(remainingMs / 60_000);
+  if (totalMin >= 60) {
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `expires in ${h}h ${m}m`;
+  }
+  if (totalMin >= 1) return `expires in ${totalMin}m`;
+  const sec = Math.max(1, Math.floor(remainingMs / 1000));
+  return `expires in ${sec}s`;
+}
 
 export default function SessionThreadView() {
   const params = useParams<{ sid: string }>();
@@ -156,6 +185,17 @@ export default function SessionThreadView() {
   // and replayed thread land naturally.
   const handleRestart = useCallback(async () => {
     if (!sessionId || restarting) return;
+    // Manual restart of a healthy sandbox is destructive — it stops the
+    // running Fargate task and spawns a new one. The history is replayed,
+    // but in-flight tool runs / unsaved scratch state are lost. Confirm.
+    if (session?.status === "ready") {
+      const ok = window.confirm(
+        "Restart will stop the current sandbox and start a fresh one. " +
+          "Conversation history will be replayed; in-flight work is lost.\n\n" +
+          "Continue?",
+      );
+      if (!ok) return;
+    }
     setRestarting(true);
     setRestartError(null);
     try {
@@ -170,7 +210,7 @@ export default function SessionThreadView() {
     } finally {
       setRestarting(false);
     }
-  }, [sessionId, restarting, loadSession]);
+  }, [sessionId, restarting, loadSession, session]);
 
   // Refresh session status periodically so creating→ready transitions are
   // visible in the header and the composer enables when the harness is up.
@@ -339,6 +379,17 @@ function MainPanel({
   const isReady = session?.status === "ready";
   const isDead = statusLabel === "dead" || statusLabel === "failed";
 
+  // Re-render the idle countdown every 30s so the header label stays fresh
+  // without spamming server polls. Detached from the existing 5s session
+  // poll because the countdown is purely client-side arithmetic.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), COUNTDOWN_TICK_MS);
+    return () => window.clearInterval(id);
+  }, []);
+  const expiresLabel = formatExpiresIn(session, nowMs);
+  const canRestart = !!session && statusLabel !== "creating";
+
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 bg-white overflow-hidden">
       {/* Header */}
@@ -382,8 +433,41 @@ function MainPanel({
             }`}
           />
           <span className="mono text-[11px] text-gray-500">{statusLabel}</span>
+          {expiresLabel && (
+            <>
+              <span className="text-gray-300" aria-hidden>·</span>
+              <span
+                className="mono text-[11px] text-gray-500"
+                title="Sandbox is reaped after the idle window. Send a message to reset the timer."
+              >
+                {expiresLabel}
+              </span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2 text-gray-400">
+          <button
+            type="button"
+            onClick={handleRestart}
+            disabled={!canRestart || restarting}
+            title={
+              statusLabel === "creating"
+                ? "Sandbox is still spinning up"
+                : isReady
+                  ? "Restart sandbox (replays history)"
+                  : "Restart sandbox"
+            }
+            className="inline-flex items-center gap-1.5 text-[12px] text-gray-600 border border-gray-200 rounded px-2 py-1 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {restarting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RotateCw className="w-3.5 h-3.5" />
+            )}
+            <span className="hidden sm:inline">
+              {restarting ? "Restarting…" : "Restart"}
+            </span>
+          </button>
           <button className="p-1.5 hover:bg-gray-100 rounded">
             <MoreHorizontal className="w-4 h-4" />
           </button>
@@ -414,35 +498,22 @@ function MainPanel({
           {isDead && (
             <div className="border border-gray-200 bg-gray-50 rounded-lg px-4 py-3 flex items-start gap-3">
               <div className="flex-1 text-[13px] text-gray-700 leading-relaxed">
-                Session ended (
+                Sandbox ended (
                 <span className="mono text-[12px] text-gray-500">
                   {statusLabel}
                 </span>
-                ) — prior conversation was preserved.
-                {restartError && (
-                  <div className="mono text-[11px] text-red-700 mt-1">
-                    {restartError}
-                  </div>
-                )}
+                ) — prior conversation was preserved. Use the Restart
+                button in the header to start a fresh sandbox; the saved
+                history will replay as the first message.
               </div>
-              <button
-                type="button"
-                onClick={handleRestart}
-                disabled={restarting}
-                className="shrink-0 inline-flex items-center gap-1.5 border border-gray-300 bg-white text-[13px] text-gray-700 rounded-md px-3 py-1.5 hover:bg-gray-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {restarting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Restarting…
-                  </>
-                ) : (
-                  <>
-                    <RotateCw className="w-3.5 h-3.5" />
-                    Restart session
-                  </>
-                )}
-              </button>
+            </div>
+          )}
+          {restartError && (
+            <div className="border border-red-200 bg-red-50 rounded-lg px-4 py-3 text-[13px] text-red-800">
+              <div className="font-medium">Restart failed</div>
+              <div className="mono text-[11px] text-red-700 mt-1 break-words">
+                {restartError}
+              </div>
             </div>
           )}
 

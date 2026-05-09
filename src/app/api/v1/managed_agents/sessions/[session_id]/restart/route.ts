@@ -68,13 +68,15 @@ export async function POST(req: Request, ctx: RouteContext) {
     });
     if (!row) httpError(404, `session ${session_id} not found`);
 
-    // `creating` means a previous bring-up is still in flight; `ready` means
-    // the session is healthy and the caller should just send a message.
-    // Both are 409 — restart is for `failed`/`dead` rows.
-    if (row.status === "creating" || row.status === "ready") {
+    // `creating` means a previous bring-up is still in flight — racing it
+    // with another runTask would orphan the in-flight task. `ready` is OK:
+    // users can manually restart a healthy session (e.g. recovering from a
+    // wedged opencode harness, or opting into a fresh sandbox while keeping
+    // history). The route stops the existing task before spawning a new one.
+    if (row.status === "creating") {
       httpError(
         409,
-        `session ${session_id} is ${row.status}; nothing to restart`,
+        `session ${session_id} is creating; wait for it to settle before restarting`,
       );
     }
 
