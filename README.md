@@ -4,7 +4,9 @@ A control plane for **managed agents** running on a [LiteLLM](https://github.com
 
 Each agent is `(harness, repo)` — e.g. opencode + your monorepo. Spawning a session boots a fresh Fargate task running that harness against that repo. The proxy owns the lifecycle. This UI talks to it.
 
-Pairs with [BerriAI/litellm#27427](https://github.com/BerriAI/litellm/pull/27427). Requires `general_settings.managed_agents.enabled: true` on the proxy.
+<img width="1056" height="720" alt="Google Chrome" src="https://github.com/user-attachments/assets/13a8ab51-3cf2-493c-ae25-bc7bcacadc4b" />
+
+
 
 ## What you get
 
