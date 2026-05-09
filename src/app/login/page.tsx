@@ -13,6 +13,18 @@ import {
   clearStoredMasterKey,
 } from "@/lib/api";
 
+// Next 16 (Turbopack) refuses to prerender pages that read useSearchParams
+// without a Suspense boundary — it bails CSR for the inner component, and
+// the outer page stays prerenderable. Splitting keeps `/login` static while
+// the form reads `?next=…` on the client.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
@@ -85,13 +97,5 @@ function LoginForm() {
         </Button>
       </form>
     </div>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense>
-      <LoginForm />
-    </Suspense>
   );
 }

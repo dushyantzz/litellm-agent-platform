@@ -19,15 +19,20 @@ import {
   Square,
   Image as ImageIcon,
   Loader2,
+  ChevronDown,
+  Wrench,
+  RotateCw,
 } from "lucide-react";
 import {
   ApiError,
   AgentRow,
-  HarnessMessageResponse,
+  HarnessMessage,
+  HarnessMessagePart,
   SessionRow,
+  api,
   getAgent,
   getSession,
-  harnessResponseText,
+  listSessionMessages,
   sendMessage,
 } from "@/lib/api";
 import { AgentAvatar } from "@/components/agent-avatar";
@@ -37,13 +42,72 @@ type LocalRole = "user" | "assistant";
 interface LocalMessage {
   id: string;
   role: LocalRole;
-  text: string;
+  // user msgs use `text`. assistant msgs use `parts` once `completed`.
+  // `text` on assistant is reserved for the failed/error path.
+  text?: string;
+  parts?: HarnessMessagePart[];
   status: "in_progress" | "completed" | "failed";
   error?: string;
 }
 
+// Map opencode's `[{info, parts}, ...]` thread into the local message
+// structure. User entries collapse to text-only; assistant entries carry
+// the full parts array so reasoning/tool blocks render.
+function mapHarnessMessages(msgs: HarnessMessage[]): LocalMessage[] {
+  return msgs.map((m) => {
+    const role: LocalRole = m.info?.role === "user" ? "user" : "assistant";
+    if (role === "user") {
+      const text = (m.parts ?? [])
+        .filter((p) => p?.type === "text" && typeof p.text === "string")
+        .map((p) => p.text as string)
+        .join("");
+      return {
+        id: m.info.id,
+        role,
+        text,
+        status: "completed",
+      };
+    }
+    return {
+      id: m.info.id,
+      role,
+      parts: m.parts ?? [],
+      status: "completed",
+    };
+  });
+}
+
 const POLL_INTERVAL_MS = 5000;
 const NEAR_BOTTOM_PX = 200;
+const COUNTDOWN_TICK_MS = 30_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+// Render the idle-reap countdown for a `ready` sandbox. Reconciler reaps
+// `ready` sessions that haven't had message activity within
+// `idle_timeout_ms` (24h by default). Returns null when the session isn't
+// active, so callers can skip rendering entirely.
+function formatExpiresIn(
+  session: SessionRow | null,
+  nowMs: number,
+): string | null {
+  if (!session || session.status !== "ready") return null;
+  const lastSeenIso = session.last_seen_at ?? session.created_at;
+  if (!lastSeenIso) return null;
+  const lastSeenMs = Date.parse(lastSeenIso);
+  if (Number.isNaN(lastSeenMs)) return null;
+  const idleMs = session.idle_timeout_ms ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const remainingMs = lastSeenMs + idleMs - nowMs;
+  if (remainingMs <= 0) return "expiring now";
+  const totalMin = Math.floor(remainingMs / 60_000);
+  if (totalMin >= 60) {
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `expires in ${h}h ${m}m`;
+  }
+  if (totalMin >= 1) return `expires in ${totalMin}m`;
+  const sec = Math.max(1, Math.floor(remainingMs / 1000));
+  return `expires in ${sec}s`;
+}
 
 export default function SessionThreadView() {
   const params = useParams<{ sid: string }>();
@@ -56,10 +120,11 @@ export default function SessionThreadView() {
   const [sending, setSending] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState<boolean>(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const seededFromInitialPromptRef = useRef<boolean>(false);
 
   const hasInProgress = useMemo(
     () => messages.some((m) => m.status === "in_progress"),
@@ -73,23 +138,20 @@ export default function SessionThreadView() {
     return "";
   }, [session, agent]);
 
-  // Append the initial-prompt response (returned by spawn) so the user lands
-  // on a thread that already shows the conversation seed.
-  function seedFromInitialResponse(resp: HarnessMessageResponse | null | undefined) {
-    if (!resp || seededFromInitialPromptRef.current) return;
-    const text = harnessResponseText(resp);
-    if (!text) return;
-    seededFromInitialPromptRef.current = true;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `seed-${Date.now()}`,
-        role: "assistant",
-        text,
-        status: "completed",
-      },
-    ]);
-  }
+  // Pull the full opencode thread and replace local state. Source of truth
+  // lives in the harness — POST /message only returns the final assistant
+  // turn, so we re-fetch after every send to pick up tool/reasoning parts
+  // from the agent loop.
+  const refreshThread = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const msgs = await listSessionMessages(sessionId);
+      setMessages(mapHarnessMessages(msgs));
+    } catch (e) {
+      // Harness can be unreachable mid-spawn — leave existing thread alone.
+      console.warn("listSessionMessages failed", e);
+    }
+  }, [sessionId]);
 
   const loadSession = useCallback(async () => {
     if (!sessionId) return;
@@ -98,22 +160,57 @@ export default function SessionThreadView() {
     try {
       const s = await getSession(sessionId);
       setSession(s);
-      seedFromInitialResponse(s.response);
       try {
         setAgent(await getAgent(s.agent_id));
       } catch {
         setAgent(null);
+      }
+      if (s.status === "ready") {
+        await refreshThread();
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, refreshThread]);
 
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+
+  // Restart a dead/failed session. The backend POST takes 60-120s while a
+  // fresh Fargate task spins up; keep the UI responsive (the button shows a
+  // spinner) and re-fetch the session once it returns so the new ready state
+  // and replayed thread land naturally.
+  const handleRestart = useCallback(async () => {
+    if (!sessionId || restarting) return;
+    // Manual restart of a healthy sandbox is destructive — it stops the
+    // running Fargate task and spawns a new one. The history is replayed,
+    // but in-flight tool runs / unsaved scratch state are lost. Confirm.
+    if (session?.status === "ready") {
+      const ok = window.confirm(
+        "Restart will stop the current sandbox and start a fresh one. " +
+          "Conversation history will be replayed; in-flight work is lost.\n\n" +
+          "Continue?",
+      );
+      if (!ok) return;
+    }
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      await api<unknown>(
+        "POST",
+        `/v1/managed_agents/sessions/${encodeURIComponent(sessionId)}/restart`,
+      );
+      await loadSession();
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : (e as Error).message;
+      setRestartError(msg);
+    } finally {
+      setRestarting(false);
+    }
+  }, [sessionId, restarting, loadSession, session]);
 
   // Refresh session status periodically so creating→ready transitions are
   // visible in the header and the composer enables when the harness is up.
@@ -171,20 +268,16 @@ export default function SessionThreadView() {
     setMessages((prev) => [
       ...prev,
       { id: userId, role: "user", text: content, status: "completed" },
-      { id: assistantId, role: "assistant", text: "", status: "in_progress" },
+      { id: assistantId, role: "assistant", status: "in_progress" },
     ]);
     setDraft("");
 
     try {
-      const resp = await sendMessage(sessionId, { text: content });
-      const text = harnessResponseText(resp) || "(no text in response)";
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, text, status: "completed" }
-            : m,
-        ),
-      );
+      // POST returns only the final assistant message; refresh from the
+      // harness afterwards so tool/reasoning parts that came from earlier
+      // iterations of the agent loop also render.
+      await sendMessage(sessionId, { text: content });
+      await refreshThread();
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : (e as Error).message;
       setError(msg);
@@ -228,6 +321,9 @@ export default function SessionThreadView() {
         handleKeyDown={handleKeyDown}
         messagesEndRef={messagesEndRef}
         scrollContainerRef={scrollContainerRef}
+        restarting={restarting}
+        restartError={restartError}
+        handleRestart={handleRestart}
       />
     </div>
   );
@@ -253,6 +349,9 @@ interface MainPanelProps {
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  restarting: boolean;
+  restartError: string | null;
+  handleRestart: () => void;
 }
 
 function MainPanel({
@@ -271,10 +370,25 @@ function MainPanel({
   handleKeyDown,
   messagesEndRef,
   scrollContainerRef,
+  restarting,
+  restartError,
+  handleRestart,
 }: MainPanelProps) {
   const sessionShortId = session?.id ? session.id.slice(0, 8) : "—";
   const statusLabel = session?.status ?? "unknown";
   const isReady = session?.status === "ready";
+  const isDead = statusLabel === "dead" || statusLabel === "failed";
+
+  // Re-render the idle countdown every 30s so the header label stays fresh
+  // without spamming server polls. Detached from the existing 5s session
+  // poll because the countdown is purely client-side arithmetic.
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), COUNTDOWN_TICK_MS);
+    return () => window.clearInterval(id);
+  }, []);
+  const expiresLabel = formatExpiresIn(session, nowMs);
+  const canRestart = !!session && statusLabel !== "creating";
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 bg-white overflow-hidden">
@@ -313,14 +427,47 @@ function MainPanel({
                 ? "bg-emerald-500"
                 : statusLabel === "creating"
                   ? "bg-amber-500"
-                  : statusLabel === "failed"
+                  : statusLabel === "failed" || statusLabel === "dead"
                     ? "bg-red-500"
                     : "bg-gray-300"
             }`}
           />
           <span className="mono text-[11px] text-gray-500">{statusLabel}</span>
+          {expiresLabel && (
+            <>
+              <span className="text-gray-300" aria-hidden>·</span>
+              <span
+                className="mono text-[11px] text-gray-500"
+                title="Sandbox is reaped after the idle window. Send a message to reset the timer."
+              >
+                {expiresLabel}
+              </span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2 text-gray-400">
+          <button
+            type="button"
+            onClick={handleRestart}
+            disabled={!canRestart || restarting}
+            title={
+              statusLabel === "creating"
+                ? "Sandbox is still spinning up"
+                : isReady
+                  ? "Restart sandbox (replays history)"
+                  : "Restart sandbox"
+            }
+            className="inline-flex items-center gap-1.5 text-[12px] text-gray-600 border border-gray-200 rounded px-2 py-1 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {restarting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RotateCw className="w-3.5 h-3.5" />
+            )}
+            <span className="hidden sm:inline">
+              {restarting ? "Restarting…" : "Restart"}
+            </span>
+          </button>
           <button className="p-1.5 hover:bg-gray-100 rounded">
             <MoreHorizontal className="w-4 h-4" />
           </button>
@@ -345,6 +492,28 @@ function MainPanel({
           {!loading && messages.length === 0 && isReady && (
             <div className="text-[13px] text-gray-400">
               Sandbox is ready. Send a message below.
+            </div>
+          )}
+
+          {isDead && (
+            <div className="border border-gray-200 bg-gray-50 rounded-lg px-4 py-3 flex items-start gap-3">
+              <div className="flex-1 text-[13px] text-gray-700 leading-relaxed">
+                Sandbox ended (
+                <span className="mono text-[12px] text-gray-500">
+                  {statusLabel}
+                </span>
+                ) — prior conversation was preserved. Use the Restart
+                button in the header to start a fresh sandbox; the saved
+                history will replay as the first message.
+              </div>
+            </div>
+          )}
+          {restartError && (
+            <div className="border border-red-200 bg-red-50 rounded-lg px-4 py-3 text-[13px] text-red-800">
+              <div className="font-medium">Restart failed</div>
+              <div className="mono text-[11px] text-red-700 mt-1 break-words">
+                {restartError}
+              </div>
             </div>
           )}
 
@@ -392,7 +561,7 @@ function MessageBlock({
   isFirstUser: boolean;
 }) {
   if (msg.role === "user") {
-    return <UserPromptBlock content={msg.text} emphasized={isFirstUser} />;
+    return <UserPromptBlock content={msg.text ?? ""} emphasized={isFirstUser} />;
   }
   return <AssistantBlock msg={msg} />;
 }
@@ -418,26 +587,153 @@ function UserPromptBlock({
 function AssistantBlock({ msg }: { msg: LocalMessage }) {
   const failed = msg.status === "failed";
   const inProgress = msg.status === "in_progress";
+  const parts = msg.parts ?? [];
+
+  // Render parts in order. Skip step-start/step-finish — internal markers
+  // with no UI affordance. Group consecutive text parts so markdown lists
+  // still render correctly.
+  const visibleParts = parts.filter((p) => {
+    const t = typeof p?.type === "string" ? p.type : "";
+    return t === "text" || t === "reasoning" || t === "tool";
+  });
 
   return (
     <div className="flex flex-col gap-3">
-      {msg.text ? (
+      {failed && msg.text ? (
         <div
-          className="sessions-md text-[14px] text-gray-800 leading-relaxed"
-          style={{ color: failed ? "#b91c1c" : undefined }}
+          className="sessions-md text-[14px] leading-relaxed"
+          style={{ color: "#b91c1c" }}
         >
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
         </div>
-      ) : inProgress ? (
+      ) : inProgress && visibleParts.length === 0 ? (
         <div className="flex items-center gap-2 text-[14px] text-gray-400 leading-relaxed">
           <Loader2 className="w-3 h-3 animate-spin" />
           thinking…
         </div>
-      ) : null}
+      ) : (
+        visibleParts.map((p, i) => (
+          <PartBlock key={i} part={p} />
+        ))
+      )}
 
       {failed && msg.error && (
         <div className="mono text-[11px] text-red-700">{msg.error}</div>
       )}
+    </div>
+  );
+}
+
+function PartBlock({ part }: { part: HarnessMessagePart }) {
+  const t = typeof part?.type === "string" ? part.type : "";
+  if (t === "text") {
+    const text = typeof part.text === "string" ? part.text : "";
+    if (!text) return null;
+    return (
+      <div className="sessions-md text-[14px] text-gray-800 leading-relaxed">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      </div>
+    );
+  }
+  if (t === "reasoning") {
+    const text = typeof part.text === "string" ? part.text : "";
+    if (!text) return null;
+    return <ReasoningBlock text={text} />;
+  }
+  if (t === "tool") {
+    return <ToolBlock part={part} />;
+  }
+  return null;
+}
+
+function ReasoningBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const preview = text.length > 120 ? text.slice(0, 120) + "…" : text;
+  return (
+    <div className="border-l-2 border-gray-200 pl-3 text-[13px] text-gray-500 italic leading-relaxed">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-start gap-1 text-left hover:text-gray-700"
+      >
+        <ChevronDown
+          className={`w-3 h-3 mt-1 shrink-0 transition-transform ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+        <span className="whitespace-pre-wrap">
+          {open ? text : preview}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function ToolBlock({ part }: { part: HarnessMessagePart }) {
+  const [open, setOpen] = useState(false);
+  const toolName =
+    typeof part.tool === "string" ? part.tool : "tool";
+  const state = (part.state as Record<string, unknown> | undefined) ?? {};
+  const status =
+    typeof state.status === "string" ? state.status : "unknown";
+  const input = state.input;
+  const output = state.output;
+  const hasDetails = input !== undefined || output !== undefined;
+
+  const statusColor =
+    status === "completed"
+      ? "text-emerald-600"
+      : status === "error"
+        ? "text-red-600"
+        : status === "running"
+          ? "text-amber-600"
+          : "text-gray-500";
+
+  return (
+    <div className="border border-gray-200 rounded-md bg-gray-50/60 text-[13px]">
+      <button
+        type="button"
+        onClick={() => hasDetails && setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-left ${
+          hasDetails ? "hover:bg-gray-100 cursor-pointer" : "cursor-default"
+        }`}
+      >
+        <Wrench className="w-3 h-3 text-gray-500 shrink-0" />
+        <span className="mono text-gray-700">{toolName}</span>
+        <span className={`mono text-[11px] ${statusColor}`}>{status}</span>
+        {hasDetails && (
+          <ChevronDown
+            className={`ml-auto w-3 h-3 text-gray-400 transition-transform ${
+              open ? "" : "-rotate-90"
+            }`}
+          />
+        )}
+      </button>
+      {open && hasDetails && (
+        <div className="border-t border-gray-200 px-3 py-2 flex flex-col gap-2">
+          {input !== undefined && (
+            <ToolKv label="input" value={input} />
+          )}
+          {output !== undefined && (
+            <ToolKv label="output" value={output} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolKv({ label, value }: { label: string; value: unknown }) {
+  const text =
+    typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="mono text-[10px] uppercase tracking-wide text-gray-400">
+        {label}
+      </span>
+      <pre className="mono text-[11px] text-gray-700 whitespace-pre-wrap break-words bg-white border border-gray-200 rounded p-2 max-h-64 overflow-auto">
+        {text}
+      </pre>
     </div>
   );
 }

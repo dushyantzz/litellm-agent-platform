@@ -18,8 +18,9 @@ RUN apk add --no-cache openssl
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generate the Prisma client before next build — types like Prisma.AgentUpdateInput
-# are required by app code.
+# `npm ci` ran in the `deps` stage without prisma/schema.prisma in scope, so
+# the Prisma client wasn't generated. Generate it here once the schema is
+# present, before `next build` typechecks against `Prisma.*` types.
 RUN npx prisma generate
 
 # `output: "standalone"` in next.config.ts emits .next/standalone with a

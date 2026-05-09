@@ -10,6 +10,7 @@ import { fetch } from "undici";
 
 import type {
   HarnessCreateSessionOpts,
+  HarnessMessage,
   HarnessMessagePart,
   HarnessMessageResponse,
   HarnessSendMessageOpts,
@@ -79,6 +80,63 @@ export async function harnessCreateSession(
     );
   }
   return (data as { id: string }).id;
+}
+
+/**
+ * `GET /session/:id/message` — full thread including all intermediate
+ * assistant messages (tool calls, reasoning) within each agent loop. POST
+ * only returns the final assistant message, so the UI uses this list as
+ * the source of truth for rendering tool/reasoning parts.
+ */
+export async function harnessListMessages(opts: {
+  sandbox_url: string;
+  harness_session_id: string;
+  timeout_ms?: number;
+}): Promise<HarnessMessage[]> {
+  const {
+    sandbox_url,
+    harness_session_id,
+    timeout_ms = DEFAULT_CREATE_TIMEOUT_MS,
+  } = opts;
+  const url = `${sandbox_url}/session/${harness_session_id}/message`;
+  const res = await fetch(url, {
+    method: "GET",
+    signal: AbortSignal.timeout(timeout_ms),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `harness request failed: GET ${url} -> ${res.status} ${res.statusText}: ${text}`,
+    );
+  }
+  const data = await res.json();
+  if (!Array.isArray(data)) {
+    throw new Error(
+      `unexpected harness messages response (not array): ${JSON.stringify(data).slice(0, 200)}`,
+    );
+  }
+  return data as HarnessMessage[];
+}
+
+/**
+ * Render a persisted opencode thread (the `[{info, parts}, ...]` shape from
+ * `harnessListMessages`) into a single text blob suitable for replaying as
+ * the first user message of a restarted session.
+ *
+ * The opencode harness has no import endpoint, so replay must go through
+ * `POST /session/:id/message` as a text part. We dump the full message array
+ * as pretty-printed JSON inside `<previous_session_history><msgs>...</msgs>`
+ * tags so the model receives a lossless record of the prior session and can
+ * interpret it as context rather than a fresh user request.
+ */
+export function formatHistoryAsText(msgs: HarnessMessage[]): string {
+  return [
+    "<previous_session_history>",
+    "<msgs>",
+    JSON.stringify(msgs, null, 2),
+    "</msgs>",
+    "</previous_session_history>",
+  ].join("\n");
 }
 
 export async function harnessSendMessage(

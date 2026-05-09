@@ -167,6 +167,12 @@ export interface SessionRow {
   task_arn?: string | null;
   response?: HarnessMessageResponse | null;
   created_at?: string | null;
+  // Last user-message activity (ISO 8601). Null until the first message
+  // bumps it; UI falls back to `created_at` for the idle countdown.
+  last_seen_at?: string | null;
+  // Idle window after which the reconciler reaps a `ready` sandbox. Sent
+  // by the backend so the UI doesn't hardcode SESSION_IDLE_TIMEOUT_MS.
+  idle_timeout_ms?: number;
 }
 
 /**
@@ -186,6 +192,24 @@ export interface HarnessMessagePart {
 export interface HarnessMessageResponse {
   parts?: HarnessMessagePart[];
   [key: string]: unknown;
+}
+
+export interface HarnessMessageInfo {
+  id: string;
+  sessionID: string;
+  role: "user" | "assistant" | string;
+  [key: string]: unknown;
+}
+
+/**
+ * One entry from `GET /sessions/:id/messages` — the full opencode thread.
+ * A single user prompt can spawn multiple assistant entries within the agent
+ * loop (tool call, reasoning, final text); rendering all of them is what
+ * surfaces "internal logic" in the UI.
+ */
+export interface HarnessMessage {
+  info: HarnessMessageInfo;
+  parts: HarnessMessagePart[];
 }
 
 // ---------- Models / MCP (other proxy endpoints, unchanged) ----------
@@ -451,6 +475,25 @@ export function deleteSession(id: string): Promise<{ id: string; status: string 
   );
 }
 
+/**
+ * Respawn a Fargate task for a `failed` / `dead` session and replay the
+ * persisted opencode history as the new harness session's first user
+ * message. As slow as `spawnSession` (50–90s typical) since it goes through
+ * the same RunTask → wait-for-IP → wait-for-harness path. Returns the
+ * updated session row in the same shape as `getSession`.
+ */
+export function restartSession(
+  id: string,
+  init?: ApiInit,
+): Promise<SessionRow> {
+  return api<SessionRow>(
+    "POST",
+    `/v1/managed_agents/sessions/${encodeURIComponent(id)}/restart`,
+    undefined,
+    init,
+  );
+}
+
 // ---------- Session messages (passthrough to harness) ----------
 
 export interface SendMessageRequest {
@@ -467,6 +510,24 @@ export function sendMessage(
     "POST",
     `/v1/managed_agents/sessions/${encodeURIComponent(sessionId)}/message`,
     req,
+    init,
+  );
+}
+
+/**
+ * Full thread for a session — proxies opencode's `GET /session/:id/message`.
+ * Use this instead of relying on `sendMessage`'s return value when the UI
+ * needs to render tool calls and reasoning parts: those live in earlier
+ * sibling assistant messages that POST does not return.
+ */
+export function listSessionMessages(
+  sessionId: string,
+  init?: ApiInit,
+): Promise<HarnessMessage[]> {
+  return api<HarnessMessage[]>(
+    "GET",
+    `/v1/managed_agents/sessions/${encodeURIComponent(sessionId)}/messages`,
+    undefined,
     init,
   );
 }
