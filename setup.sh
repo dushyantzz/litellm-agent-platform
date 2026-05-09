@@ -1,30 +1,67 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# First run: scaffold .env from .env.example, seed a random MASTER_KEY, exit.
-# User fills in AWS + LiteLLM creds, re-runs.
+# Replace key=value in .env in-place; append if missing. `|` is the sed
+# delimiter — values from prompts can contain `/` and `:`.
+update_env() {
+  local key="$1" val="$2" file=".env"
+  if [ ! -f "$file" ]; then
+    echo "$key=$val" >> "$file"
+    return
+  fi
+  if grep -q "^${key}=" "$file"; then
+    sed -i.bak "s|^${key}=.*|${key}=${val}|" "$file" && rm -f "${file}.bak"
+  else
+    echo "$key=$val" >> "$file"
+  fi
+}
+
+# Bootstrap .env from .env.example with a random MASTER_KEY on first run.
 if [ ! -f .env ]; then
   cp .env.example .env
   if command -v openssl >/dev/null 2>&1; then
-    KEY=$(openssl rand -hex 32)
-    sed -i.bak "s|^MASTER_KEY=.*|MASTER_KEY=$KEY|" .env && rm -f .env.bak
+    update_env MASTER_KEY "$(openssl rand -hex 32)"
   fi
-  cat <<'EOF'
-
-✓ created .env from .env.example with a random MASTER_KEY.
-
-Open .env and fill in:
-  • AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY  (need ECS/ECR/EC2/IAM/Logs/STS)
-  • LITELLM_API_BASE, LITELLM_API_KEY
-
-Then re-run: ./setup.sh
-
-EOF
-  exit 0
+  echo "✓ created .env from .env.example with a random MASTER_KEY"
+  echo
 fi
 
+# Prompt for any required key that's still blank. Non-interactive shells
+# (CI etc.) get the legacy behavior — print what's missing and exit.
+prompt_missing() {
+  local key="$1" label="$2" default="$3" secret="$4"
+  local current
+  current=$(grep -E "^${key}=" .env | head -1 | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/')
+  if [ -n "$current" ]; then return; fi
+
+  if [ ! -t 0 ]; then
+    echo "✗ ${key} is empty in .env. Fill it in and re-run." >&2
+    exit 1
+  fi
+
+  local val
+  if [ -n "$default" ]; then
+    read -r -p "${label} [${default}]: " val
+    val="${val:-$default}"
+  elif [ "$secret" = "1" ]; then
+    read -r -s -p "${label}: " val; echo
+  else
+    read -r -p "${label}: " val
+  fi
+  if [ -z "$val" ]; then
+    echo "✗ ${key} is required."; exit 1
+  fi
+  update_env "$key" "$val"
+}
+
+prompt_missing AWS_REGION             "AWS region"               "us-east-1" 0
+prompt_missing AWS_ACCESS_KEY_ID      "AWS_ACCESS_KEY_ID"        ""          0
+prompt_missing AWS_SECRET_ACCESS_KEY  "AWS_SECRET_ACCESS_KEY"    ""          1
+prompt_missing LITELLM_API_BASE       "LiteLLM gateway URL"      ""          0
+prompt_missing LITELLM_API_KEY        "LiteLLM API key"          ""          1
+
 set -a
-source .env  # AWS_REGION, AWS_CLUSTER, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+source .env
 set +a
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -88,21 +125,7 @@ TASK_DEF_ARN=$(aws ecs register-task-definition --region "$AWS_REGION" \
 JSON
 )" --query "taskDefinition.taskDefinitionArn" --output text)
 
-# 8. Write outputs into .env in-place (replace if key present, append if not).
-update_env() {
-  local key="$1" val="$2" file=".env"
-  if [ ! -f "$file" ]; then
-    echo "$key=$val" >> "$file"
-    return
-  fi
-  if grep -q "^${key}=" "$file"; then
-    # `|` is a safe sed delimiter — ARNs and image URIs use `:` and `/`.
-    sed -i.bak "s|^${key}=.*|${key}=${val}|" "$file" && rm -f "${file}.bak"
-  else
-    echo "$key=$val" >> "$file"
-  fi
-}
-
+# 8. Write provisioned values back into .env (replace if present, append if not).
 update_env AWS_TASK_DEFINITION_ARN "$TASK_DEF_ARN"
 update_env AWS_SUBNETS              "$SUBNET_ID"
 update_env AWS_SECURITY_GROUP       "$SG_ID"

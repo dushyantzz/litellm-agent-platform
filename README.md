@@ -19,7 +19,7 @@ We built this because we wanted a managed agent solution, but fully self-hosted.
 docker compose up
 ```
 
-Needs Docker Desktop, AWS credentials with ECS/ECR/EC2/IAM/Logs/STS, a LiteLLM gateway. First `./setup.sh` run creates `.env` (with a random `MASTER_KEY`) and exits — fill in your AWS keys and `LITELLM_API_BASE` / `LITELLM_API_KEY`, then re-run.
+Needs Docker Desktop, AWS credentials with ECS/ECR/EC2/IAM/Logs/STS, a LiteLLM gateway. `./setup.sh` interactively prompts for AWS keys and the LiteLLM gateway URL/key on first run, then provisions AWS infra (ECR, IAM, SG, cluster, task def) and writes everything back into `.env`. `docker compose up` boots Postgres, runs the schema migration as an init container, and starts web (`:3000`) + worker.
 
 ### Container env passthrough
 
