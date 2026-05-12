@@ -42,16 +42,18 @@ export async function GET(req: Request, ctx: RouteContext) {
     const { session_id } = await ctx.params;
 
     // The /v1/managed_agents/* routes live in *this* Next.js app — UI
-    // and platform API are the same Render service. Build the upstream
-    // URL from the inbound request's own origin so we never leak this
-    // call to a different host (notably NOT LITELLM_API_BASE, which
-    // points at the LiteLLM gateway and 404s these paths).
+    // and platform API are the same Render service. We must NOT fetch
+    // the public URL: Render / Cloudflare blocks the hairpin self-call
+    // (502 "upstream unreachable") and even when it works it adds an
+    // edge round-trip per SSE byte. Talk to localhost on the same port
+    // the Node server is bound to.
     //
     // `LAP_INTERNAL_URL` is the documented escape hatch for split
     // deployments / local dev where the UI runs against a different
-    // LAP host. Empty => same-origin via the inbound request URL.
+    // LAP host (e.g. http://localhost:4096 for a separate instance).
     const explicit = (process.env.LAP_INTERNAL_URL || "").replace(/\/+$/, "");
-    const base = explicit || new URL(req.url).origin;
+    const port = process.env.PORT || "3000";
+    const base = explicit || `http://127.0.0.1:${port}`;
     const upstreamUrl =
       `${base}/api/v1/managed_agents/sessions/` +
       `${encodeURIComponent(session_id)}/stream`;
