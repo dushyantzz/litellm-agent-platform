@@ -408,6 +408,8 @@ export interface ServerEnv {
   // production deploy that overrides the API server URL still validates
   // certs.
   K8S_SKIP_TLS_VERIFY: boolean;
+  // true when web/worker run inside EKS — enables pod-DNS routing, disables NodePort creation
+  IN_CLUSTER: string;
   PREINSTALLED_GITHUB_REPO: string;
   LITELLM_API_BASE: string;
   LITELLM_API_KEY: string;

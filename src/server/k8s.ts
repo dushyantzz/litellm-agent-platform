@@ -387,41 +387,43 @@ export async function runTask(
     if (!isAlreadyExists(err)) throw err;
   }
 
-  try {
-    // Sandbox controller stamps the pod with the Sandbox name; we mirror that
-    // into the Service selector via a label the agent-sandbox controller adds
-    // automatically (`agents.x-k8s.io/sandbox: <name>`). Fall back to
-    // matching the pod name 1:1 since the pod is named after the Sandbox.
-    const service: k8s.V1Service = {
-      apiVersion: "v1",
-      kind: "Service",
-      metadata: { name: svcName(name), namespace: ns, labels },
-      spec: {
-        type: "NodePort",
-        selector: { [LABEL_SANDBOX_NAME]: name },
-        ports: [
-          {
-            port: agent.container_port,
-            targetPort: agent.container_port,
-            protocol: "TCP",
-          },
-        ],
-      },
-    };
+  if (env.IN_CLUSTER !== "true") {
     try {
-      await coreApi().createNamespacedService({ namespace: ns, body: service });
+      // Sandbox controller stamps the pod with the Sandbox name; we mirror that
+      // into the Service selector via a label the agent-sandbox controller adds
+      // automatically (`agents.x-k8s.io/sandbox: <name>`). Fall back to
+      // matching the pod name 1:1 since the pod is named after the Sandbox.
+      const service: k8s.V1Service = {
+        apiVersion: "v1",
+        kind: "Service",
+        metadata: { name: svcName(name), namespace: ns, labels },
+        spec: {
+          type: "NodePort",
+          selector: { [LABEL_SANDBOX_NAME]: name },
+          ports: [
+            {
+              port: agent.container_port,
+              targetPort: agent.container_port,
+              protocol: "TCP",
+            },
+          ],
+        },
+      };
+      try {
+        await coreApi().createNamespacedService({ namespace: ns, body: service });
+      } catch (err) {
+        if (!isAlreadyExists(err)) throw err;
+        // Same idempotency story as the Sandbox: adopt the existing
+        // Service rather than fail the spawn. The selector is deterministic
+        // from the Sandbox name so a pre-existing Service points at our pod.
+      }
     } catch (err) {
-      if (!isAlreadyExists(err)) throw err;
-      // Same idempotency story as the Sandbox: adopt the existing
-      // Service rather than fail the spawn. The selector is deterministic
-      // from the Sandbox name so a pre-existing Service points at our pod.
+      // Roll back the Sandbox to avoid orphans.
+      await deleteSandbox(name).catch(() => {
+        /* best-effort */
+      });
+      throw err;
     }
-  } catch (err) {
-    // Roll back the Sandbox to avoid orphans.
-    await deleteSandbox(name).catch(() => {
-      /* best-effort */
-    });
-    throw err;
   }
 
   return { task_arn: name };
@@ -530,7 +532,7 @@ export async function readNodePort(name: string): Promise<number | null> {
  */
 export async function readPodPhase(
   name: string,
-): Promise<{ phase: string | undefined; reason: string | undefined }> {
+): Promise<{ phase: string | undefined; reason: string | undefined; containerReason: string | undefined; exitCode: number | undefined }> {
   try {
     const res = await coreApi().readNamespacedPod({
       name,
@@ -538,12 +540,19 @@ export async function readPodPhase(
     });
     const pod = (res as unknown as { body?: k8s.V1Pod }).body
       ?? (res as k8s.V1Pod);
+    const cs = pod.status?.containerStatuses?.[0];
+    const waiting = cs?.state?.waiting;
+    const terminated = cs?.state?.terminated;
+    const containerReason = waiting?.reason ?? terminated?.reason;
+    const exitCode = terminated?.exitCode ?? undefined;
     return {
       phase: pod.status?.phase,
       reason: pod.status?.reason ?? pod.status?.message,
+      containerReason,
+      exitCode,
     };
   } catch (err) {
-    if (isNotFound(err)) return { phase: undefined, reason: undefined };
+    if (isNotFound(err)) return { phase: undefined, reason: undefined, containerReason: undefined, exitCode: undefined };
     throw err;
   }
 }
@@ -610,8 +619,33 @@ export async function waitRunningGetUrl(
   timeout_ms: number = DEFAULT_RUNNING_TIMEOUT_MS,
 ): Promise<string> {
   const deadline = Date.now() + timeout_ms;
-  let nodePort: number | null = null;
   let lastReason = "";
+  let lastContainerReason: string | undefined;
+
+  // In-cluster: pod DNS is routable directly. No NodePort needed.
+  // agent-sandbox auto-creates a headless Service at <sandbox-name>.<namespace>.svc.cluster.local
+  // Wait for Running only, then return DNS URL.
+  if (env.IN_CLUSTER === "true") {
+    const containerPort = agent.container_port ?? 3000;
+    while (Date.now() < deadline) {
+      const { phase, reason, containerReason, exitCode } = await readPodPhase(task_arn);
+      if (phase === "Failed") throw new Error(`pod ${task_arn} failed: ${reason ?? "?"}`);
+      if (containerReason && containerReason !== lastContainerReason) {
+        const detail = exitCode !== undefined ? ` exitCode=${exitCode}` : "";
+        console.warn(`pod ${task_arn} containerReason=${containerReason}${detail}`);
+        lastContainerReason = containerReason;
+      }
+      if (phase === "Running") {
+        return `http://${task_arn}.${env.K8S_NAMESPACE}.svc.cluster.local:${containerPort}`;
+      }
+      lastReason = `phase=${phase ?? "?"} (in-cluster)`;
+      await sleep(POLL_RUNNING_INTERVAL_MS);
+    }
+    throw new Error(`sandbox ${task_arn} never reached Running within ${timeout_ms}ms (last: ${lastReason})`);
+  }
+  // Out-of-cluster: existing NodePort path follows...
+
+  let nodePort: number | null = null;
 
   while (Date.now() < deadline) {
     if (nodePort === null) nodePort = await readNodePort(task_arn);

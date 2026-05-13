@@ -32,6 +32,8 @@ const EnvSchema = z.object({
     .optional()
     .default("false")
     .transform((v) => v === "true"),
+  // true when web/worker run inside EKS — enables pod-DNS routing, disables NodePort creation
+  IN_CLUSTER: z.enum(["true", "false"]).optional().default("false"),
   PREINSTALLED_GITHUB_REPO: z.string().min(1),
   LITELLM_API_BASE: z.string().min(1),
   LITELLM_API_KEY: z.string().min(1),

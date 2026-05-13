@@ -1,3 +1,13 @@
+# MIGRATION IN PROGRESS: web + worker moving to EKS in-cluster.
+# See k8s/web.yaml and k8s/worker.yaml for the target deployment manifests.
+# See .github/workflows/deploy-eks.yml for the CI/CD pipeline.
+# Render stays active as a fallback until EKS is validated.
+#
+# TODO (remove these from Render once EKS is live):
+#   - AWS_ACCESS_KEY_ID
+#   - AWS_SECRET_ACCESS_KEY
+#   - KUBE_CONFIG_B64
+
 # Render Blueprint. Powers the "Deploy to Render" button in
 # deploy/render/README.md.
 #
@@ -75,11 +85,11 @@ services:
       # at request time, so the AWS_* env vars below are required for the
       # exec-plugin to mint a token on each k8s API call.
       - key: KUBE_CONFIG_B64
-        sync: false
+        sync: false # TODO: remove after EKS in-cluster migration
       - key: AWS_ACCESS_KEY_ID
-        sync: false
+        sync: false # TODO: remove after EKS in-cluster migration
       - key: AWS_SECRET_ACCESS_KEY
-        sync: false
+        sync: false # TODO: remove after EKS in-cluster migration
       - key: AWS_REGION
         sync: false
       # Platform discovers any Ready node ExternalIP via the apiserver
@@ -142,11 +152,11 @@ services:
       # See web service comment — kubeconfig uses aws-iam-authenticator at
       # request time, so AWS_* are mandatory for the exec-plugin to auth.
       - key: KUBE_CONFIG_B64
-        sync: false
+        sync: false # TODO: remove after EKS in-cluster migration
       - key: AWS_ACCESS_KEY_ID
-        sync: false
+        sync: false # TODO: remove after EKS in-cluster migration
       - key: AWS_SECRET_ACCESS_KEY
-        sync: false
+        sync: false # TODO: remove after EKS in-cluster migration
       - key: AWS_REGION
         sync: false
       - key: K8S_NODE_HOST

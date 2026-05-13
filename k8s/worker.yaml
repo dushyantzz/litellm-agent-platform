@@ -1,0 +1,137 @@
+# Background worker Deployment for litellm-agent-platform.
+#
+# The worker runs `npm run worker` which resolves to `tsx src/worker/index.ts`
+# (see package.json). It shares the same image as the web service but does
+# not expose any port or require a Service.
+#
+# Env vars mirror the web Deployment exactly, with the following omissions:
+#   - PORT is not needed (no HTTP listener)
+# All secret refs come from the same `litellm-env` Secret.
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm-worker
+  namespace: default
+  labels:
+    app: litellm-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm-worker
+  template:
+    metadata:
+      labels:
+        app: litellm-worker
+    spec:
+      serviceAccountName: litellm-platform
+
+      containers:
+        - name: worker
+          # Substituted by GitHub Actions:
+          #   envsubst '${AWS_ACCOUNT_ID} ${AWS_REGION} ${GIT_SHA}'
+          image: 888602223428.dkr.ecr.us-east-1.amazonaws.com/litellm-agent-platform:${GIT_SHA}
+          imagePullPolicy: IfNotPresent
+
+          # Mirrors `npm run worker` → `tsx src/worker/index.ts`.
+          command: ["/bin/sh", "-c"]
+          args:
+            - "npm run worker"
+
+          # ── Secrets (from litellm-env Secret) ──────────────────────────
+          env:
+            - name: MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-env
+                  key: MASTER_KEY
+
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-env
+                  key: DATABASE_URL
+
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-env
+                  key: LITELLM_API_KEY
+
+            - name: KUBE_CONFIG_B64
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-env
+                  key: KUBE_CONFIG_B64
+                  optional: true
+
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-env
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-env
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+
+            # ── Non-secret literals ──────────────────────────────────────
+            - name: NODE_ENV
+              value: "production"
+
+            - name: UI_USERNAME
+              value: "admin"
+
+            - name: LITELLM_API_BASE
+              value: ""   # set to your LiteLLM proxy URL
+
+            - name: LITELLM_DEFAULT_MODEL
+              value: "anthropic/claude-sonnet-4-6"
+
+            - name: PREINSTALLED_GITHUB_REPO
+              value: "https://github.com/BerriAI/litellm"
+
+            - name: AWS_REGION
+              value: ""   # set to your EKS cluster region if using EKS auth
+
+            - name: K8S_NODE_HOST
+              value: "auto"
+
+            - name: K8S_HARNESS_IMAGE
+              value: ""   # e.g. <account>.dkr.ecr.<region>.amazonaws.com/claude-agent-sdk-sandbox:latest
+
+            - name: K8S_NAMESPACE
+              value: "default"
+
+            - name: K8S_NODEPORT_MIN
+              value: "30000"
+
+            - name: K8S_NODEPORT_MAX
+              value: "30099"
+
+            - name: K8S_IMAGE_PULL_POLICY
+              value: "IfNotPresent"
+
+            - name: WARM_POOL_SIZE
+              value: "2"
+
+            # Force in-cluster auth; disable file-based kubeconfig.
+            - name: IN_CLUSTER
+              value: "true"
+
+            - name: KUBECONFIG
+              value: ""
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

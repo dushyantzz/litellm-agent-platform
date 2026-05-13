@@ -1,0 +1,183 @@
+# Deploy to Amazon EKS on every push to main.
+#
+# ── Required GitHub Secrets ────────────────────────────────────────────────────
+#
+#   AWS_ROLE_ARN       ARN of the IAM role GitHub Actions will assume via OIDC.
+#                      Example: arn:aws:iam::123456789012:role/github-actions-deploy
+#                      The role needs:
+#                        • ecr:GetAuthorizationToken (on *)
+#                        • ecr:BatchCheckLayerAvailability, ecr:PutImage,
+#                          ecr:InitiateLayerUpload, ecr:UploadLayerPart,
+#                          ecr:CompleteLayerUpload
+#                          (on arn:aws:ecr:<region>:<account>:repository/litellm-agent-platform)
+#                        • eks:DescribeCluster (for update-kubeconfig)
+#                        • The EKS cluster's aws-auth ConfigMap must grant
+#                          the role kubectl RBAC (system:masters or a
+#                          scoped role with get/patch on deployments).
+#
+#   AWS_ACCOUNT_ID     12-digit AWS account number. Example: 123456789012
+#
+#   AWS_REGION         AWS region where ECR and EKS live. Example: us-east-1
+#
+#   EKS_CLUSTER_NAME   Name of the EKS cluster. Example: litellm-agents
+#
+# ── One-time IAM / OIDC Setup (run once per AWS account) ──────────────────────
+#
+#   1. Create an OIDC identity provider in IAM for GitHub Actions:
+#        Provider URL : https://token.actions.githubusercontent.com
+#        Audience     : sts.amazonaws.com
+#      AWS Console → IAM → Identity providers → Add provider
+#      (or: aws iam create-open-id-connect-provider)
+#
+#   2. Create an IAM role with the trust policy below, then attach the
+#      permissions listed under AWS_ROLE_ARN above.
+#
+#      Trust policy (replace ORG/REPO as needed):
+#      {
+#        "Version": "2012-10-17",
+#        "Statement": [{
+#          "Effect": "Allow",
+#          "Principal": {
+#            "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+#          },
+#          "Action": "sts:AssumeRoleWithWebIdentity",
+#          "Condition": {
+#            "StringEquals": {
+#              "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+#            },
+#            "StringLike": {
+#              "token.actions.githubusercontent.com:sub": "repo:<ORG>/<REPO>:ref:refs/heads/main"
+#            }
+#          }
+#        }]
+#      }
+#
+#   3. Grant the role kubectl access by editing the EKS aws-auth ConfigMap:
+#        kubectl edit configmap aws-auth -n kube-system
+#      Add under mapRoles:
+#        - rolearn: <AWS_ROLE_ARN>
+#          username: github-actions
+#          groups:
+#            - system:masters   # or a least-privilege group
+#
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: Deploy to EKS
+
+on:
+  push:
+    branches: [main]
+
+# Minimal top-level permissions; each job declares only what it needs.
+permissions: {}
+
+jobs:
+
+  # ── Job 1: Build the Docker image and push it to ECR ───────────────────────
+  build-push:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required by aws-actions/configure-aws-credentials OIDC token exchange.
+      id-token: write
+
+    outputs:
+      # Propagate the fully-qualified image URI to the deploy job.
+      image: ${{ steps.image-tag.outputs.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          # Mask the account ID in logs for defense-in-depth.
+          mask-aws-account-id: true
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: image-tag
+        # ECR registry URL is emitted by the login step; we append the repo
+        # name and pin to the commit SHA for reproducibility.
+        run: |
+          IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/litellm-agent-platform:${{ github.sha }}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          # Also surface it as a step output so the deploy job can consume it.
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        run: docker build -t "$IMAGE" .
+
+      - name: Push image (SHA tag)
+        run: docker push "$IMAGE"
+
+      - name: Tag and push image (latest)
+        run: |
+          LATEST="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/litellm-agent-platform:latest"
+          docker tag "$IMAGE" "$LATEST"
+          docker push "$LATEST"
+
+  # ── Job 2: Roll out the new image to EKS deployments ──────────────────────
+  deploy:
+    name: Deploy to EKS
+    needs: build-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      - name: Update web deployment image
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          kubectl set image deployment/litellm-web \
+            web="$IMAGE" \
+            -n default
+
+      - name: Update worker deployment image
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          kubectl set image deployment/litellm-worker \
+            worker="$IMAGE" \
+            -n default
+
+      - name: Wait for web rollout
+        run: |
+          kubectl rollout status deployment/litellm-web \
+            -n default \
+            --timeout=300s
+
+      - name: Wait for worker rollout
+        run: |
+          kubectl rollout status deployment/litellm-worker \
+            -n default \
+            --timeout=300s
