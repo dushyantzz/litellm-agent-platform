@@ -40,8 +40,6 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 # ── 1. Platform health + auth (Authorization header, never in URL) ────────────
-# This also implicitly proves that a valid token is accepted — if MASTER_KEY
-# were wrong or the platform were rejecting auth, this returns 401/403, not 200.
 try:
     req = urllib.request.Request(
         f"{ALB_URL}/api/v1/health/k8s",
@@ -55,8 +53,6 @@ except Exception as e:
 
 
 # ── 2. TTY proxy rejects invalid token with 401 ───────────────────────────────
-# Only the wrong-token case uses a query param — a throwaway value, no secret
-# in the URL. The valid-token path is already covered by the health check above.
 FAKE_SESSION = "00000000-0000-0000-0000-000000000000"
 
 
