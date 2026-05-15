@@ -35,15 +35,13 @@ const PKG_VERSION = (() => {
   } catch { return "?"; }
 })();
 
-// ANSI helpers. `vlen` strips escapes for visible-width math so the banner
-// and picker can right-align metadata next to colored cells without their
-// width math getting thrown off by zero-width control sequences.
-const vlen = s => s.replace(/\x1b\[[0-9;]*m/g, "").length;
-const padTo = (s, n) => s + " ".repeat(Math.max(0, n - vlen(s)));
+// ANSI helpers used by the banner, picker, and command output.
 const ansi = {
-  reset: "\x1b[0m", bold: s => `\x1b[1m${s}\x1b[0m`, dim: s => `\x1b[2m${s}\x1b[0m`,
-  cyan: s => `\x1b[36m${s}\x1b[0m`, red: s => `\x1b[31m${s}\x1b[0m`,
-  green: s => `\x1b[32m${s}\x1b[0m`, yellow: s => `\x1b[33m${s}\x1b[0m`,
+  bold: s => `\x1b[1m${s}\x1b[0m`,
+  dim: s => `\x1b[2m${s}\x1b[0m`,
+  cyan: s => `\x1b[36m${s}\x1b[0m`,
+  red: s => `\x1b[31m${s}\x1b[0m`,
+  yellow: s => `\x1b[33m${s}\x1b[0m`,
   blueBold: s => `\x1b[1;94m${s}\x1b[0m`,
 };
 
