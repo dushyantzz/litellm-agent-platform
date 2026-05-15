@@ -10,11 +10,16 @@ Browser (xterm.js)  ◀── ws ──▶  bridge (node, this image)  ◀──
 
 ## Auth
 
-The `/tty` WebSocket and the platform-compat HTTP endpoints (`POST /session`,
-`/event`, etc.) all require a bearer token matching `HARNESS_AUTH_TOKEN`.
-**The harness fails closed if this env var is empty** — every WS upgrade is
-rejected with `401`, every HTTP request to a session route returns `401`. Only
-`/healthz` is anonymous.
+The `/tty` WebSocket — the only endpoint that spawns a PTY and gives the
+caller a shell — requires a bearer token matching `HARNESS_AUTH_TOKEN`.
+**The harness fails closed if this env var is empty**: every WS upgrade is
+rejected with `401` before any process is spawned.
+
+The HTTP endpoints (`/healthz`, `POST /session`, `GET /session/:id/message`,
+etc.) are LAP-platform-compat stubs that return constants — no credentials,
+no shell access, no session contents — and are intentionally anonymous so
+the platform's bootstrap probe doesn't have to hold the harness's auth
+token.
 
 Token is accepted via:
 

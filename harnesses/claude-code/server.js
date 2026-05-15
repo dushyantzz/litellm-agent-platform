@@ -121,8 +121,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Everything below this point requires the bearer token.
-  if (!isAuthed(req)) return unauthorized(res);
+  // NOTE: The HTTP endpoints below are LAP-platform-compat stubs. They return
+  // constants (session id "tty", empty message history, keepalive SSE) and
+  // never expose credentials, shell access, or session contents. We leave
+  // them unauthenticated so the platform's bootstrap probe can mark the
+  // sandbox `ready` without holding the harness's auth token. The actual
+  // load-bearing surface — `/tty` WebSocket — is auth-gated below at the
+  // upgrade handshake, before any PTY spawns.
 
   // Platform-compat stubs: the LAP platform expects every harness to expose
   // the same JSON contract (POST /session, GET /session/:id/message, etc.).
