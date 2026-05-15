@@ -267,7 +267,10 @@ async function buildContainerEnv(
   const base: Record<string, string> = {
     REPO_URL: agent.repo_url ?? env.PREINSTALLED_GITHUB_REPO,
     BRANCH: agent.branch,
-    LITELLM_API_KEY: env.LITELLM_API_KEY,
+    // LITELLM_API_KEY is intentionally omitted here — it is passed to the
+    // vault sidecar as REAL_LITELLM_API_KEY so vault stubs it before the
+    // harness starts. The harness sources /lap-shared/env and receives only
+    // the stub, keeping the real key off the process's visible environment.
     LITELLM_API_BASE: env.LITELLM_API_BASE,
     LITELLM_DEFAULT_MODEL: agent.model,
     AGENT_PROMPT: fullPrompt,
@@ -332,6 +335,14 @@ function buildVaultEnv(opts: RunTaskOpts): Array<{ name: string; value: string }
   // MASTER_KEY is the shared secret both sides hash to derive the
   // /interceptions auth token. Without it the platform's queries 401.
   out.push({ name: "MASTER_KEY", value: env.MASTER_KEY });
+
+  // Route LITELLM_API_KEY through vault so the harness only ever sees a stub.
+  // Vault writes LITELLM_API_KEY=stub_xxx to /lap-shared/env; the harness
+  // sources that file before starting, so `ANTHROPIC_API_KEY` (which the
+  // claude-code harness derives from it) is also a stub — the real key never
+  // appears in the process environment. Outbound API calls carry the stub in
+  // Authorization headers; vault swaps it for the real key at the wire.
+  out.push({ name: "REAL_LITELLM_API_KEY", value: env.LITELLM_API_KEY });
 
   // Egress enforcement — vault checks these before proxying each CONNECT.
   const allowOut = Array.isArray(agent.allow_out) ? (agent.allow_out as string[]) : [];
