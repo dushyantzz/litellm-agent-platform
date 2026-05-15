@@ -412,8 +412,8 @@ export default function NewAgentPage() {
         </div>
       )}
 
-      <div className={cn("mt-5", selectedTemplate && "grid grid-cols-1 items-start gap-6 xl:grid-cols-[1fr,440px]")}>
-        <Card>
+      <div className="mt-5 flex flex-col gap-4">
+        <Card className="order-2">
         <CardHeader className="sr-only">
           <CardTitle>New Agent</CardTitle>
           <CardDescription>
@@ -870,7 +870,7 @@ export default function NewAgentPage() {
         </Card>
 
         {selectedTemplate && (
-          <div className="sticky top-6">
+          <div>
             <Card className="overflow-hidden">
               <div className="flex border-b text-[13px]">
                 {(["overview", "files", "skill", "prompt"] as const)
