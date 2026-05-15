@@ -298,6 +298,7 @@ async function buildContainerEnv(
     // git/curl/python/go/ruby. Node fetch and SEA binaries read
     // NODE_EXTRA_CA_CERTS, not the OS store — point them at the bundle.
     HTTPS_PROXY: "http://127.0.0.1:14322",
+    HTTP_PROXY: "http://127.0.0.1:14322",
     NO_PROXY: "localhost,127.0.0.1,.svc.cluster.local,.svc,.cluster.local",
     NODE_EXTRA_CA_CERTS: "/etc/ssl/certs/ca-certificates.crt",
     VAULT_ENABLED: "true",
@@ -322,6 +323,13 @@ function buildVaultEnv(opts: RunTaskOpts): Array<{ name: string; value: string }
   // MASTER_KEY is the shared secret both sides hash to derive the
   // /interceptions auth token. Without it the platform's queries 401.
   out.push({ name: "MASTER_KEY", value: env.MASTER_KEY });
+
+  // Egress enforcement — vault checks these before proxying each CONNECT.
+  const allowOut = Array.isArray(agent.allow_out) ? (agent.allow_out as string[]) : [];
+  const denyOut = Array.isArray(agent.deny_out) ? (agent.deny_out as string[]) : [];
+  if (allowOut.length > 0) out.push({ name: "EGRESS_ALLOW_OUT", value: allowOut.join(",") });
+  if (denyOut.length > 0) out.push({ name: "EGRESS_DENY_OUT", value: denyOut.join(",") });
+
   return out;
 }
 
