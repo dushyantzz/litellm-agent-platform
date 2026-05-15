@@ -154,6 +154,8 @@ export interface AgentRow {
   model: string;
   prompt?: string | null;
   harness_id: string;
+  /** Derived server-side; true for `claude-code` / `codex` (see TUI_HARNESSES). */
+  supports_tui?: boolean;
   branch: string;
   pfp_url?: string | null;
   mcp_servers?: string[];
