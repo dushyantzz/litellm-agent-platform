@@ -15,6 +15,14 @@ if [ "${VAULT_ENABLED:-}" = "true" ]; then
   if [ ! -s /lap-shared/env ]; then
     echo "[entrypoint] vault not ready after 15s — unsetting proxy, proceeding without stubs" >&2
     unset HTTPS_PROXY HTTP_PROXY NO_PROXY
+    # Also drop the CA-bundle overrides. With vault down, egress goes direct to
+    # public hosts (github.com, pypi.org, …) which present real certs signed by
+    # Mozilla roots. Leaving SSL_CERT_FILE / REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE /
+    # GIT_SSL_CAINFO pointing at /etc/vault-ca/tls.crt would make every direct
+    # HTTPS call fail SSL verification (git clone, uv pip install, the phase
+    # report curl). NODE_EXTRA_CA_CERTS supplements (doesn't replace) Node's
+    # built-in bundle, so it's safe to leave set.
+    unset SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE GIT_SSL_CAINFO
   else
     set -a
     . /lap-shared/env
