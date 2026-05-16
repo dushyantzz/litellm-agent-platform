@@ -4,7 +4,7 @@
 
 LiteLLM Agent Platform is self-hosted infrastructure for running coding agents — Claude Code, Codex, anything — inside isolated sandboxes with a credential vault, so agents can run with bypass-permissions on without ever seeing your real keys. Use it from the `lap` CLI in your terminal, the web UI, or call the API directly.
 
-**Learn more in the [docs](./docs)**.
+**Learn more in the [docs](https://docs.litellm-agent-platform.ai/)**.
 
 <img width="964" height="720" alt="lap_2" src="https://github.com/user-attachments/assets/a68b21fa-20b6-4ddc-a011-1bc9e6a3b296" />
 
