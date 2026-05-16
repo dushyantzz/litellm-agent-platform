@@ -21,9 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       make g++ ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv as a single static binary, pinned by checksum-verified release.
-# (Following AGENTS.md CI Supply-Chain Safety: no `curl | sh` of an unpinned
-# installer.) uv installs to /usr/local/bin/uv.
+# Install uv as a single static binary, pinned by version + SHA-256
+# checksum from astral's per-asset `.sha256` sidecar. Following AGENTS.md
+# CI Supply-Chain Safety: no `curl | sh` of an unpinned installer, and
+# every downloaded binary has its digest verified before extraction.
 ARG UV_VERSION=0.5.11
 RUN ARCH=$(uname -m) && \
     case "$ARCH" in \
@@ -31,10 +32,17 @@ RUN ARCH=$(uname -m) && \
       aarch64) UV_TARGET="aarch64-unknown-linux-gnu" ;; \
       *) echo "unsupported arch $ARCH" && exit 1 ;; \
     esac && \
-    curl -fsSL -o /tmp/uv.tar.gz "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TARGET}.tar.gz" && \
-    tar -xzf /tmp/uv.tar.gz -C /tmp && \
-    mv /tmp/uv-${UV_TARGET}/uv /usr/local/bin/uv && \
-    rm -rf /tmp/uv.tar.gz /tmp/uv-${UV_TARGET} && \
+    cd /tmp && \
+    curl -fsSL -o uv.tar.gz "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TARGET}.tar.gz" && \
+    curl -fsSL -o uv.tar.gz.sha256 "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TARGET}.tar.gz.sha256" && \
+    EXPECTED=$(awk '{print $1}' uv.tar.gz.sha256) && \
+    ACTUAL=$(sha256sum uv.tar.gz | awk '{print $1}') && \
+    if [ "$EXPECTED" != "$ACTUAL" ]; then \
+      echo "uv checksum mismatch: expected $EXPECTED got $ACTUAL" >&2; exit 1; \
+    fi && \
+    tar -xzf uv.tar.gz && \
+    mv uv-${UV_TARGET}/uv /usr/local/bin/uv && \
+    rm -rf uv.tar.gz uv.tar.gz.sha256 uv-${UV_TARGET} && \
     uv --version
 
 # Clone hermes-agent at a pinned release tag and install into a venv at
@@ -77,7 +85,10 @@ RUN useradd -m -u 1001 -s /bin/bash sandbox \
 
 ENV PORT=4096
 ENV REPO_DIR=/work/repo
-ENV POC_CMD=hermes
+# Pass `--tui` so the modern Ink-based interactive UI launches by default.
+# Plain `hermes` falls back to the legacy CLI which doesn't render properly
+# over a bare PTY. server.js splits POC_CMD on whitespace to support argv.
+ENV POC_CMD="hermes --tui"
 ENV TERM=xterm-256color
 ENV HERMES_HOME=/home/sandbox/.hermes
 
