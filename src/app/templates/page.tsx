@@ -4,7 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FileCode, Globe, Pencil, Plus, Trash2 } from "lucide-react";
 
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { SANDBOX_TEMPLATES_STORAGE_KEY } from "@/lib/constants";
 
 export interface SandboxFile {
@@ -73,14 +83,35 @@ function TemplateCard({ template, onDelete }: { template: LocalTemplate; onDelet
           >
             <Pencil className="size-3.5" aria-hidden />
           </Link>
-          <button
-            type="button"
-            aria-label={`Delete ${template.name}`}
-            onClick={onDelete}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:hover:bg-red-950 dark:hover:text-red-400"
-          >
-            <Trash2 className="size-3.5" aria-hidden />
-          </button>
+          <Dialog>
+            <DialogTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Delete ${template.name}`}
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:hover:bg-red-950 dark:hover:text-red-400"
+                />
+              }
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+            </DialogTrigger>
+            <DialogContent showCloseButton={false}>
+              <DialogHeader>
+                <DialogTitle>Delete Template</DialogTitle>
+                <DialogDescription>
+                  Delete <strong className="text-foreground">{template.name}</strong>? This cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <DialogClose render={<Button variant="destructive" onClick={onDelete} />}>
+                  Delete
+                </DialogClose>
+                <DialogClose render={<Button variant="outline" />}>
+                  Cancel
+                </DialogClose>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
