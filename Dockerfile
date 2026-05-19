@@ -117,13 +117,16 @@ COPY --from=builder --chown=nextjs:nodejs /app/src/worker ./src/worker
 COPY --from=builder --chown=nextjs:nodejs /app/agent_templates.json ./agent_templates.json
 COPY --from=builder --chown=nextjs:nodejs /app/agent-templates ./agent-templates
 
-# TCP proxy that fronts the Next.js standalone server and pipes /tty WS
-# upgrades directly to cluster-internal sandbox pods (IN_CLUSTER mode).
-# ARG here so `docker build --build-arg GIT_SHA=<sha>` busts the cache for
-# this layer, preventing stale copies when only server-proxy.mjs changes.
+# TCP proxy. ARG + sha256 check ensures the correct file is baked in even if
+# Docker re-uses a cached COPY layer from ECR.
 ARG GIT_SHA=unknown
-RUN echo "$GIT_SHA" > /dev/null
+ARG SERVER_PROXY_SHA256=unknown
 COPY --chown=nextjs:nodejs server-proxy.mjs ./server-proxy.mjs
+RUN actual=$(sha256sum /app/server-proxy.mjs | awk '{print $1}') && \
+    echo "server-proxy.mjs sha256: $actual (expected: $SERVER_PROXY_SHA256)" && \
+    [ "$SERVER_PROXY_SHA256" = "unknown" ] || \
+    [ "$actual" = "$SERVER_PROXY_SHA256" ] || \
+    (echo "FATAL: server-proxy.mjs hash mismatch — baked wrong file" && exit 1)
 
 USER nextjs
 EXPOSE 3000

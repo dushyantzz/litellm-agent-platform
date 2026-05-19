@@ -141,7 +141,12 @@ jobs:
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image
-        run: docker build --no-cache --build-arg GIT_SHA="${{ github.sha }}" -t "$IMAGE" .
+        run: |
+          SP_SHA=$(sha256sum server-proxy.mjs | awk '{print $1}')
+          docker build --no-cache \
+            --build-arg GIT_SHA="${{ github.sha }}" \
+            --build-arg SERVER_PROXY_SHA256="$SP_SHA" \
+            -t "$IMAGE" .
 
       - name: Verify server-proxy.mjs in image
         run: |
