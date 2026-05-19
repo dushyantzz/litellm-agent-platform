@@ -852,10 +852,14 @@ const TITLE_PREVIEW_MAX_LENGTH = 60;
  * Pull the first user-message text from the cached harness thread snapshot
  * and trim it for the sidebar label. The `history` column on `Session` is
  * the canonical opencode thread shape: `[{info: {role, ...}, parts: [...]}, ...]`
- * — we look for the first entry where `info.role === "user"`, concatenate its
- * text-typed parts, and truncate. Returns null when the row has no history
- * yet (brand-new session) or no user turn has been recorded — caller falls
- * back to the short-id label.
+ * — we walk user-role entries in order, concatenate their text-typed parts,
+ * and return the first non-empty one truncated to TITLE_PREVIEW_MAX_LENGTH.
+ *
+ * Pure non-text user turns (e.g. an image upload with no caption, a
+ * tool_result on the user side) are skipped — we keep scanning so a later
+ * text turn still produces a useful label. Returns null only when no user
+ * turn in the thread carries any text at all (brand-new session, or a
+ * thread that is image-only end-to-end). Caller falls back to the short-id.
  */
 function extractTitlePreview(history: unknown): string | null {
   if (!Array.isArray(history)) return null;
@@ -878,7 +882,9 @@ function extractTitlePreview(history: unknown): string | null {
       .map((p) => p.text)
       .join("")
       .trim();
-    if (!text) return null;
+    // Skip image-only / tool-result-only user turns and keep scanning — the
+    // next user turn's caption is a better label than the short-id fallback.
+    if (!text) continue;
     // Collapse internal whitespace so multi-line prompts render on one line
     // without trailing "\n" artefacts.
     const oneLine = text.replace(/\s+/g, " ");
