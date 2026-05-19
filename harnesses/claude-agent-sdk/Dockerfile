@@ -66,11 +66,22 @@ COPY --from=builder /build/managed-tools/dist /opt/managed-tools/dist
 WORKDIR /opt/managed-tools
 COPY managed-tools/.npmrc ./.npmrc
 RUN npm install --omit=dev --no-audit --no-fund --legacy-peer-deps
+# Playwright browsers — `npm install playwright` does NOT download browser
+# binaries since v1.38, so `screenshot_url` would fail at runtime without an
+# explicit install step. Pin the cache to /opt/ms-playwright (set BEFORE the
+# install) so the binary lands in a path the sandbox user can read at
+# runtime — the default location is $HOME/.cache/ms-playwright, which would
+# resolve to /root/.cache/ during build and be unreadable by `sandbox`.
+# Chromium system libs (libnss3, libxkbcommon0, fonts-liberation, etc.) are
+# already installed in harnesses/base, so `--with-deps` is not needed.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
 WORKDIR /opt/harnesses/claude-agent-sdk
 COPY --from=builder /build/harnesses/claude-agent-sdk/package.json ./
 COPY --from=builder /build/harnesses/claude-agent-sdk/dist ./dist
 RUN npm install --omit=dev --no-audit --no-fund --legacy-peer-deps \
-    && chown -R sandbox:sandbox /opt/harnesses /opt/managed-tools \
+    && npx --no-install playwright install chromium \
+    && chown -R sandbox:sandbox /opt/harnesses /opt/managed-tools /opt/ms-playwright \
     # Symlink the SDK's bundled `claude` binary into a stable PATH location
     # so the SDK's auto-resolver finds it regardless of cwd, AND so an agent
     # running inside the sandbox can invoke `claude` as a tool too.
