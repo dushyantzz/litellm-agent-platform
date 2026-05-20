@@ -22,13 +22,24 @@ if [ -n "${REPO_URL:-}" ]; then
   git remote set-url origin "$REPO_URL" 2>/dev/null || true
 fi
 
-# Wire LiteLLM as the OpenAI-compatible provider for opencode.
+# Wire LiteLLM through opencode's native Anthropic adapter, pointed at the
+# gateway's Anthropic Messages endpoint (BASE is already normalized to .../v1,
+# and @ai-sdk/anthropic POSTs to {baseURL}/messages → .../v1/messages).
+#
+# Why not @ai-sdk/openai-compatible: that adapter stalls after tool calls with
+# OpenAI-compatible gateways like LiteLLM (opencode#14972) — the agent runs a
+# tool then goes silent. The Anthropic path doesn't. We keep the provider id
+# "litellm" so UI/CLI/Slack model references (providerID:"litellm") still match.
+#
+# permission: allow-all so the harness runs bypass-permissions. Without it,
+# headless `opencode serve` parks forever on the first "ask" prompt with no UI
+# to approve it (opencode#16367).
 cat > opencode.json <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
   "provider": {
     "litellm": {
-      "npm": "@ai-sdk/openai-compatible",
+      "npm": "@ai-sdk/anthropic",
       "options": {
         "baseURL": "${BASE}",
         "apiKey": "${LITELLM_API_KEY}"
@@ -38,7 +49,14 @@ cat > opencode.json <<EOF
       }
     }
   },
-  "model": "litellm/${LITELLM_DEFAULT_MODEL}"
+  "model": "litellm/${LITELLM_DEFAULT_MODEL}",
+  "permission": {
+    "edit": "allow",
+    "bash": "allow",
+    "webfetch": "allow",
+    "doom_loop": "allow",
+    "external_directory": "allow"
+  }
 }
 EOF
 
