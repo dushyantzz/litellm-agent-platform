@@ -191,6 +191,10 @@ export interface SessionRow {
   id: string;
   agent_id: string;
   sandbox_url?: string | null;
+  // opencode/harness session id inside the pod. Used by the browser opencode
+  // SDK to address session.prompt / session.messages. Null until bring-up
+  // creates the harness session.
+  harness_session_id?: string | null;
   // Browser-accessible WS base URL for TUI harnesses. Non-null when the
   // session is ready and the platform can supply a reachable endpoint:
   // - IN_CLUSTER: a relative path through the platform TCP proxy.
