@@ -61,9 +61,43 @@ model Agent {
   warm_tasks           WarmTask[]
   memories             Memory[]
   integration_bindings AgentIntegrationBinding[]
+  automations          Automation[]
 
   @@index([created_by])
   @@map("managed_agent")
+}
+
+// A scheduled trigger that spawns a session for an agent on a cron cadence.
+// Multiple automations per agent (e.g. "weekdays 9am: PR status summary"
+// + "hourly: health check") — hence a separate table rather than columns
+// on Agent.
+//
+// Multi-pod safe: the worker claims due rows with
+// `SELECT ... FOR UPDATE SKIP LOCKED` and advances next_run_at inside the
+// same transaction before firing the session outside the lock window. Two
+// pods ticking at the same instant can't double-fire — see
+// src/server/automations.ts.
+model Automation {
+  automation_id String    @id @default(uuid())
+  agent_id      String
+  name          String?   // optional display label
+  instruction   String    // initial_prompt sent when the session spawns
+  cron_expr     String    // standard 5-field cron, evaluated in UTC
+  enabled       Boolean   @default(true)
+  // Pre-computed on create/update and re-computed after each fire so the
+  // worker query is a plain range scan — no cron parsing at query time.
+  next_run_at   DateTime?
+  last_run_at   DateTime?
+  created_at    DateTime  @default(now())
+  created_by    String?
+
+  agent Agent @relation(fields: [agent_id], references: [agent_id], onDelete: Cascade)
+
+  // Worker claim path: enabled rows whose next_run_at is due.
+  @@index([enabled, next_run_at])
+  // Agent detail page: list automations for one agent.
+  @@index([agent_id])
+  @@map("managed_agent_automation")
 }
 
 model Session {
