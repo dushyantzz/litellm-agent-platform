@@ -103,15 +103,18 @@ interface BringUpBody {
 
 async function resolveAgentMcpServers(
   serverIds: string[],
-): Promise<HarnessMcpServerSpec[]> {
-  if (!serverIds || serverIds.length === 0) return [];
+): Promise<{ specs: HarnessMcpServerSpec[]; warning: string | null }> {
+  if (!serverIds || serverIds.length === 0) return { specs: [], warning: null };
   const litellmBase = env.LITELLM_API_BASE.replace(/\/+$/, "");
   try {
     const res = await fetch(`${litellmBase}/v1/mcp/server`, {
       headers: { Authorization: `Bearer ${env.LITELLM_API_KEY}` },
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`resolveAgentMcpServers: LiteLLM returned ${res.status}`);
+      return { specs: [], warning: "MCP server list unavailable — tools may be missing. LiteLLM returned an error." };
+    }
     const servers = (await res.json()) as Array<{
       server_id: string;
       server_name: string;
@@ -126,14 +129,13 @@ async function resolveAgentMcpServers(
       specs.push({
         name,
         url: `${litellmBase}/mcp/${encodeURIComponent(name)}`,
-        // LiteLLM exposes MCP via streamable-HTTP (POST + SSE response).
-        // The Claude SDK maps this to type:"http", not the legacy type:"sse".
         transport: "http",
       });
     }
-    return specs;
-  } catch {
-    return [];
+    return { specs, warning: null };
+  } catch (err) {
+    console.warn(`resolveAgentMcpServers: fetch failed — ${err instanceof Error ? err.message : String(err)}`);
+    return { specs: [], warning: "MCP tools could not be loaded (LiteLLM unreachable). The session was created without them." };
   }
 }
 
@@ -628,7 +630,7 @@ export const POST = wrap<RouteContext>(async (req, ctx) => {
     const rawMcpServerIds = Array.isArray(agent.mcp_servers)
       ? (agent.mcp_servers as unknown[]).filter((v): v is string => typeof v === "string")
       : [];
-    const mcpServers = await resolveAgentMcpServers(rawMcpServerIds);
+    const { specs: mcpServers, warning: mcpWarning } = await resolveAgentMcpServers(rawMcpServerIds);
 
     const harness_session_id = await harnessCreateSession({
       sandbox_url: inlineUrl,
@@ -669,7 +671,9 @@ export const POST = wrap<RouteContext>(async (req, ctx) => {
     }
 
     const updatedSession = await prisma.session.findUniqueOrThrow({ where: { session_id: session.session_id } });
-    return Response.json(toApiSession(updatedSession, null, null, agent.harness_id));
+    const sessionJson = toApiSession(updatedSession, null, null, agent.harness_id);
+    if (mcpWarning) (sessionJson as unknown as Record<string, unknown>).warnings = [mcpWarning];
+    return Response.json(sessionJson);
   }
 
   // Fire-and-forget the bring-up. The Node runtime keeps the promise alive

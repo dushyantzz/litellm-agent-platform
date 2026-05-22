@@ -80,6 +80,7 @@ import {
 } from "./opencode-stream";
 import { TerminalPanel } from "./terminal-panel";
 import { SessionSidebar, extractLatestTasks } from "./session-sidebar";
+import { toast } from "sonner";
 
 // Harnesses whose pod exposes a PTY (xterm.js attaches to it directly)
 // rather than the JSON message API. Add new TUI harness ids here.
@@ -348,6 +349,22 @@ export default function SessionThreadView() {
   // Reset the local prompt copies when switching sessions.
   useEffect(() => {
     setSentUsers([]);
+  }, [sessionId]);
+
+  // Surface any session-creation warnings (e.g. MCP tool resolution failure)
+  // stored in sessionStorage by the new-session page.
+  useEffect(() => {
+    if (!sessionId) return;
+    const key = `session-warnings:${sessionId}`;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return;
+    sessionStorage.removeItem(key);
+    try {
+      const warnings = JSON.parse(raw) as string[];
+      for (const w of warnings) {
+        toast.warning(w, { duration: 8000 });
+      }
+    } catch { /* ignore malformed */ }
   }, [sessionId]);
 
   const hasInProgress = thread.busy;

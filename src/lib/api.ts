@@ -252,6 +252,9 @@ export interface SessionRow {
   // an opaque short-id. Null on brand-new sessions or rows whose history has
   // not yet been snapshotted — callers fall back to `Session {shortId}`.
   title_preview?: string | null;
+  // Non-fatal warnings from session creation (e.g. MCP server resolution
+  // failed). Session is usable but some features may be degraded.
+  warnings?: string[] | null;
 }
 
 /**

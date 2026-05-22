@@ -81,6 +81,9 @@ export default function NewSessionPage() {
         title: title.trim() || undefined,
         initial_prompt: initialPrompt.trim() || undefined,
       });
+      if (created.warnings?.length) {
+        sessionStorage.setItem(`session-warnings:${created.id}`, JSON.stringify(created.warnings));
+      }
       router.push(`/sessions/${created.id}`);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : (err as Error).message;
