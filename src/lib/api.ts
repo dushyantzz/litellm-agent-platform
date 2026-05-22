@@ -1113,6 +1113,18 @@ export async function getSessionThread(
     signal: opts.signal,
   });
   if (!res.ok) {
+    if (res.status === 401) {
+      clearStoredMasterKey();
+      if (
+        typeof window !== "undefined" &&
+        !window.location.pathname.startsWith("/login")
+      ) {
+        const next = encodeURIComponent(
+          window.location.pathname + window.location.search,
+        );
+        window.location.href = `/login?next=${next}`;
+      }
+    }
     const text = await res.text().catch(() => "");
     throw new ApiError(res.status, text, text || `session thread ${res.status}`);
   }
