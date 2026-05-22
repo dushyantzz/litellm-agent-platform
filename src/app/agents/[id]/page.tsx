@@ -577,6 +577,10 @@ export default function AgentDetailPage({ params }: PageProps) {
             </dl>
           </section>
 
+          <AutomationsSection agentId={agent.id} />
+
+          <AutomationRunsSection agentId={agent.id} />
+
           {/* Sessions */}
           <section className="mt-8">
             <div className="mb-3 flex items-baseline justify-between">
@@ -616,10 +620,6 @@ export default function AgentDetailPage({ params }: PageProps) {
               </ul>
             )}
           </section>
-
-          <AutomationsSection agentId={agent.id} />
-
-          <AutomationRunsSection agentId={agent.id} />
 
           <ChannelsSection agentId={agent.id} />
 
