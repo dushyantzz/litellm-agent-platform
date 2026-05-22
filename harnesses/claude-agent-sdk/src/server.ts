@@ -301,6 +301,15 @@ async function runTurn(
     effectiveSystemPrompt = (effectiveSystemPrompt ?? "") + sandboxHint;
   }
 
+  // Inject the names of any external MCP servers wired into this session so
+  // the model knows exactly what is available and doesn't guess from training.
+  if (s.mcp_servers.length > 0) {
+    const mcpNote =
+      `\n\nExternal MCP servers available in this session: ${s.mcp_servers.map((m) => m.name).join(", ")}. ` +
+      `Use the mcp__<server>__ prefix to call their tools (e.g. mcp__linear__linear-get_issue).`;
+    effectiveSystemPrompt = (effectiveSystemPrompt ?? "") + mcpNote;
+  }
+
   const options: Options = {
     cwd: REPO_DIR,
     model: modelId,
