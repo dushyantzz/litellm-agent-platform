@@ -586,7 +586,7 @@ export const POST = wrap<RouteContext>(async (req, ctx) => {
     // Fall back to the deterministic cluster-internal DNS for the brain-inline
     // Deployment that the admin settings page can create on demand.
     const inlineUrl =
-      process.env.CLAUDE_CODE_INLINE_URL ??
+      process.env.CLAUDE_CODE_INLINE_URL ||
       (env.IN_CLUSTER ? inlineHarnessUrl() : null);
     if (!inlineUrl) {
       await prisma.session.update({
