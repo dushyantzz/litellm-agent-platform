@@ -99,6 +99,32 @@ export function expandMessage(
   throw new Error("message body must include 'text', 'parts', or 'attachments'");
 }
 
+/**
+ * Prepend the agent's system prompt to the FIRST turn's parts.
+ *
+ * Why here and not in the harness: opencode has no per-session system-prompt
+ * API (system instructions only come from AGENTS.md / opencode.json, which are
+ * process-global), and the shared inline harness serves every agent from one
+ * `opencode serve` process — so a per-agent prompt can't be delivered via
+ * files. We instead lead the first message with the prompt; opencode carries
+ * it in the session's context for every later turn. No-op when prompt is empty.
+ */
+export function prependAgentSystemPrompt(
+  prompt: string | null | undefined,
+  parts: HarnessMessagePart[],
+): HarnessMessagePart[] {
+  const trimmed = prompt?.trim();
+  if (!trimmed) return parts;
+  const preamble: HarnessMessagePart = {
+    type: "text",
+    text:
+      `<system_instructions>\n${trimmed}\n</system_instructions>\n\n` +
+      `Follow the system instructions above for the entire conversation. ` +
+      `Now respond to the request below.\n`,
+  };
+  return [preamble, ...parts];
+}
+
 async function postJson(
   url: string,
   body: unknown,
