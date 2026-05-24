@@ -37,6 +37,7 @@ import { env } from "@/server/env";
 import { registry } from "@/server/metrics";
 import {
   HARNESS_BRAIN_INLINE,
+  HARNESS_OPENCODE_BRAIN_INLINE,
   RECONCILE_NEW_TASK_GRACE_MS,
   SESSION_CREATING_TIMEOUT_MS,
   SESSION_IDLE_TIMEOUT_MS,
@@ -366,14 +367,14 @@ export async function reconcileOrphans(): Promise<ReconcileResult> {
 
   // Idle sweep: ready sessions with no message activity past the idle window.
   // last_seen_at falls back to created_at if no messages were ever sent.
-  // Brain-inline sessions are excluded: no pod to reclaim, history lives in DB,
+  // Both inline harnesses are excluded: no pod to reclaim, history lives in DB,
   // the shared harness is always running — idle timeout has no benefit and
   // violates the "inline sessions live forever" invariant.
   const idleCutoff = new Date(now - SESSION_IDLE_TIMEOUT_MS);
   const idle = await prisma.session.findMany({
     where: {
       status: "ready",
-      agent: { harness_id: { not: HARNESS_BRAIN_INLINE } },
+      agent: { harness_id: { notIn: [HARNESS_BRAIN_INLINE, HARNESS_OPENCODE_BRAIN_INLINE] } },
       OR: [
         { last_seen_at: { lt: idleCutoff } },
         { AND: [{ last_seen_at: null }, { created_at: { lt: idleCutoff } }] },
@@ -425,10 +426,10 @@ export async function reconcileOrphans(): Promise<ReconcileResult> {
     where: {
       status: "ready",
       task_arn: { not: null },
-      // brain-inline sessions use a shared harness pod — their task_arn is a
+      // Both inline harnesses use a shared harness pod — their task_arn is a
       // sandbox pod that dies on idle timeout. Excluding them prevents the
       // cascade kill where a dead sandbox pod triggers the session's death.
-      agent: { harness_id: { not: HARNESS_BRAIN_INLINE } },
+      agent: { harness_id: { notIn: [HARNESS_BRAIN_INLINE, HARNESS_OPENCODE_BRAIN_INLINE] } },
     },
     include: { agent: false },
   });
