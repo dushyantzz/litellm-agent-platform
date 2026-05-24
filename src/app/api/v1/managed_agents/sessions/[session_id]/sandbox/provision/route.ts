@@ -32,7 +32,7 @@ interface RouteContext {
 
 const ProvisionBody = z.object({
   name: z.string().min(1, "name is required"),
-  project_id: z.string().min(1, "project_id is required"),
+  project_id: z.string().min(1).optional(),
 });
 
 interface ProjectEntry {
@@ -81,26 +81,26 @@ export async function POST(req: Request, ctx: RouteContext) {
     const rawProjects: Prisma.JsonValue[] = Array.isArray(agent.projects)
       ? (agent.projects as Prisma.JsonValue[])
       : [];
-    const project = rawProjects.find(
-      (p): p is ProjectEntry & Prisma.JsonObject =>
-        isProjectEntry(p) && (p as Record<string, Prisma.JsonValue>).id === body.project_id,
-    );
-    if (!project) {
-      httpError(
-        404,
-        `project ${body.project_id} not found on agent ${agent.agent_id}`,
+    // project_id is optional — omitted by harnesses that don't use projects
+    // (e.g. opencode). When present, override repo_url/branch from the project.
+    let agentWithProject = agent;
+    if (body.project_id) {
+      const project = rawProjects.find(
+        (p): p is ProjectEntry & Prisma.JsonObject =>
+          isProjectEntry(p) && (p as Record<string, Prisma.JsonValue>).id === body.project_id,
       );
+      if (!project) {
+        httpError(
+          404,
+          `project ${body.project_id} not found on agent ${agent.agent_id}`,
+        );
+      }
+      agentWithProject = {
+        ...agent,
+        repo_url: project!.repo_url as string,
+        branch: typeof project!.branch === "string" ? project!.branch : "main",
+      };
     }
-
-    // Shallow-clone the agent row, overriding repo_url / branch with the
-    // project's values so the sandbox pod clones the correct repository.
-    const projectRepoUrl = project!.repo_url as string;
-    const projectBranch = typeof project!.branch === "string" ? project!.branch : "main";
-    const agentWithProject = {
-      ...agent,
-      repo_url: projectRepoUrl,
-      branch: projectBranch,
-    };
 
     await provisionSandbox(session_id, body.name, agentWithProject, existingSandboxes);
 
