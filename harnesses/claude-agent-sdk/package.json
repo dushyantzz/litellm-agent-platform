@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "build:render": "cd ../../managed-tools && npm install && npm run build && cd ../harnesses/claude-agent-sdk && npm install && npm run build",
     "start": "node dist/server.js"
   },
   "dependencies": {
