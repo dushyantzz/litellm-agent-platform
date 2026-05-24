@@ -34,8 +34,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Label for the sandbox — used in subsequent execute() calls as sandbox_name" },
-        project_id: { type: "string", description: "ID of the project template" },
+        name: { type: "string", description: "Label for the sandbox — used in subsequent execute() calls as sandbox_name. Use 'main' if unsure." },
       },
       required: ["name"],
     },
