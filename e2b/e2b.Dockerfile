@@ -1,30 +1,94 @@
 # E2B sandbox template for LiteLLM dev work.
-# Mirrors the litellm-4gb spec (4 GB RAM / 8 vCPU set at build time) and
-# pre-clones the two repos so sandboxes start with them already present
-# (no per-session clone). Both repos are public — no token baked in.
+# Mirrors the litellm-4gb spec (4 GB RAM / 8 vCPU set at build time).
+#
+# Pre-baked so "stand up the proxy" is one command, not a 15-min yak shave:
+#   - All litellm[proxy] deps installed (pip install -e ".[proxy]" done at build time)
+#   - Global pip.conf pointing at pypi.org — no --trusted-host gymnastics
+#   - uv installed via pip (not the curl/astral installer) so uv_build resolves cleanly
+#   - PostgreSQL cluster owned by `user`, dev db pre-created
+#   - /usr/local/bin/dev-up: starts postgres + exports env vars; `source dev-up` = ready
 FROM e2bdev/code-interpreter:latest
 
 USER root
 
+# ── System packages ────────────────────────────────────────────────────────────
+# postgresql: dev db; lib*-dev + build-essential: compiled proxy deps
+# (PyNaCl→libsodium, psycopg2→libpq, cryptography→libssl/libffi)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
+ && apt-get install -y --no-install-recommends \
+      git ca-certificates \
+      postgresql postgresql-client \
+      libpq-dev libsodium-dev libssl-dev libffi-dev \
+      python3-dev build-essential pkg-config \
  && rm -rf /var/lib/apt/lists/*
 
+# ── CA bundle ──────────────────────────────────────────────────────────────────
 # Trust cloud-vault CA so HTTPS_PROXY TLS MITM succeeds in sandboxes.
-# E2B may reset /etc/ssl/certs at container startup, so we create a
-# combined bundle and point all tools at it via ENV — those vars survive.
+# E2B may reset /etc/ssl/certs at container startup; combined-ca.crt survives
+# because all tooling is pointed at it via ENV (not /etc/ssl/certs/ca-certs.crt).
 COPY cloud-vault-ca.crt /etc/cloud-vault-ca.crt
-RUN cat /etc/ssl/certs/ca-certificates.crt /etc/cloud-vault-ca.crt > /etc/ssl/certs/combined-ca.crt
+RUN cat /etc/ssl/certs/ca-certificates.crt /etc/cloud-vault-ca.crt \
+      > /etc/ssl/certs/combined-ca.crt
+
 ENV SSL_CERT_FILE=/etc/ssl/certs/combined-ca.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/combined-ca.crt
 ENV GIT_SSL_CAINFO=/etc/ssl/certs/combined-ca.crt
 ENV NODE_EXTRA_CA_CERTS=/etc/cloud-vault-ca.crt
-# Python / pip / uv / requests
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/combined-ca.crt
 ENV PIP_CERT=/etc/ssl/certs/combined-ca.crt
-# uv respects REQUESTS_CA_BUNDLE; also enable system certs as fallback
 ENV UV_NATIVE_TLS=true
 
+# ── pip config ─────────────────────────────────────────────────────────────────
+# System-wide pip.conf: always use pypi.org, always trust it, always use combined cert.
+# Eliminates the per-install --index-url / --trusted-host / --cert flag parade.
+# Both /etc/pip.conf (root) and ~/.pip/pip.conf (user) are set; pip checks both.
+RUN printf '[global]\nindex-url = https://pypi.org/simple\ntrusted-host = pypi.org\ncert = /etc/ssl/certs/combined-ca.crt\n' \
+      > /etc/pip.conf \
+ && mkdir -p /home/user/.pip \
+ && cp /etc/pip.conf /home/user/.pip/pip.conf \
+ && chown -R user:user /home/user/.pip
+
+# ENV fallbacks so subprocesses that bypass pip.conf also get the right index.
+ENV PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_TRUSTED_HOST=pypi.org
+# uv: point at pypi.org (UV_DEFAULT_INDEX = uv ≥0.4; UV_INDEX_URL = older)
+ENV UV_DEFAULT_INDEX=https://pypi.org/simple
+ENV UV_INDEX_URL=https://pypi.org/simple
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+# Install via pip (not the curl/astral install script) so it inherits pip.conf
+# and the uv_build wheel resolves without --trusted-host gymnastics.
+RUN pip install --no-cache-dir uv
+
+# ── Clone repos ───────────────────────────────────────────────────────────────
 RUN git clone --depth 1 https://github.com/BerriAI/litellm.git /home/user/litellm \
- && git clone --depth 1 https://github.com/BerriAI/litellm-docs.git /home/user/litellm-docs \
- && chown -R user:user /home/user/litellm /home/user/litellm-docs
+ && git clone --depth 1 https://github.com/BerriAI/litellm-docs.git /home/user/litellm-docs
+
+# ── Pre-install proxy deps ─────────────────────────────────────────────────────
+# Done at image-build time so agents never wait for a 200-package install.
+# Editable install (-e) means git-pull/branch-switch reflects live without reinstall.
+# Prisma binary is also downloaded here via post-install hook.
+RUN cd /home/user/litellm \
+ && pip install --no-cache-dir -e ".[proxy]"
+
+# ── PostgreSQL dev cluster ────────────────────────────────────────────────────
+# Cluster owned by `user` (not the postgres system account) so dev-up.sh can
+# start/stop it without sudo inside the sandbox.
+# pg_hba.conf default: Unix socket = trust, TCP = md5.
+# litellm connects via TCP as role `litellm` with password `litellm`.
+RUN set -e; \
+    PG_VERSION=$(ls /usr/lib/postgresql | sort -V | tail -1); \
+    PG_BIN="/usr/lib/postgresql/${PG_VERSION}/bin"; \
+    PG_DATA="/home/user/pgdata"; \
+    su -c "${PG_BIN}/initdb -D ${PG_DATA}" user; \
+    su -c "${PG_BIN}/pg_ctl -D ${PG_DATA} start -w -t 30" user; \
+    su -c "psql -c \"CREATE USER litellm WITH PASSWORD 'litellm';\"" user; \
+    su -c "psql -c \"CREATE DATABASE litellm OWNER litellm;\"" user; \
+    su -c "${PG_BIN}/pg_ctl -D ${PG_DATA} stop -m fast" user
+
+# ── dev-up script ─────────────────────────────────────────────────────────────
+# source /usr/local/bin/dev-up  → starts postgres + exports all proxy env vars
+COPY dev-up.sh /usr/local/bin/dev-up
+RUN chmod +x /usr/local/bin/dev-up
+
+RUN chown -R user:user /home/user/litellm /home/user/litellm-docs
