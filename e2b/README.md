@@ -41,6 +41,11 @@ Dev credentials baked into the image as `ENV` (and echoed by `dev-up`):
 | `LITELLM_SALT_KEY` | `sk-litellm-salt-dev-unsafe` |
 | `STORE_MODEL_IN_DB` | `True` |
 
+> These are throwaway dev-only values (same ones `dev-up` has always exported),
+> baked as image `ENV` so they're readable via `docker inspect` / `docker history`.
+> Keep this template **private** — never push the built image to a public
+> registry. The E2B template itself is private to the owning team.
+
 ## Build / update
 Requires E2B CLI auth (`e2b auth login`) for the team that owns the template.
 
