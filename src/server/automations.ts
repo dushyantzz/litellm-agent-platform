@@ -90,6 +90,7 @@ async function spawnAutomationSession(auto: DueAutomationRow): Promise<string> {
     env.PLATFORM_INTERNAL_URL ||
     env.LAP_BASE_URL ||
     "http://localhost:3000";
+  console.log("[automation] spawnAutomationSession", { baseUrl, agent_id: auto.agent_id, automation_id: auto.automation_id, pid: process.pid });
   const url = `${baseUrl.replace(/\/+$/, "")}/api/v1/managed_agents/agents/${encodeURIComponent(
     auto.agent_id,
   )}/session`;

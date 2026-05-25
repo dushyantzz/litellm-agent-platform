@@ -1303,10 +1303,14 @@ export function isInlineHarness(harness_id: string): boolean {
 // opencode-brain-inline → OPENCODE_INLINE_URL.
 export function inlineHarnessUrlEnv(harness_id: string): string | null {
   if (harness_id === HARNESS_OPENCODE_BRAIN_INLINE) {
-    return process.env.OPENCODE_INLINE_URL || null;
+    const url = process.env.OPENCODE_INLINE_URL || null;
+    if (!url) console.error("[inline-url] OPENCODE_INLINE_URL missing", { pid: process.pid, harness_id });
+    return url;
   }
   if (harness_id === HARNESS_BRAIN_INLINE) {
-    return process.env.CLAUDE_CODE_INLINE_URL || null;
+    const url = process.env.CLAUDE_CODE_INLINE_URL || null;
+    if (!url) console.error("[inline-url] CLAUDE_CODE_INLINE_URL missing", { pid: process.pid, harness_id });
+    return url;
   }
   return null;
 }

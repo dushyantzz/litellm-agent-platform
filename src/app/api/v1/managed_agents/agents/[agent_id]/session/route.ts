@@ -682,6 +682,7 @@ export const POST = wrap<RouteContext>(async (req, ctx) => {
     // in-cluster also resolves to the active pod IP so the session is pinned
     // to it (the reconciler uses sandbox_url to detect a drained pod). The
     // opencode inline server is configured purely via OPENCODE_INLINE_URL.
+    console.log("[session/inline] harness check", { harness_id: agent.harness_id, OPENCODE_INLINE_URL: process.env.OPENCODE_INLINE_URL, CLAUDE_CODE_INLINE_URL: process.env.CLAUDE_CODE_INLINE_URL, pid: process.pid });
     const inlineUrl =
       inlineHarnessUrlEnv(agent.harness_id) ||
       (!isOpencodeInline && env.IN_CLUSTER ? await getInlineHarnessPodUrl() : null);
