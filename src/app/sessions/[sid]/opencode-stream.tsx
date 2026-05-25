@@ -150,17 +150,19 @@ export function useOpencodeThread(
       let backoffMs = 1000;
       while (!cancelled) {
         try {
+          // Pass the abort signal so an unmount mid-fetch cancels the request
+          // instead of keeping the reconnect loop alive until it resolves.
           const hist = await oc.session.messages({
             path: { id: harnessSessionId },
+            signal: ctl.signal,
           });
+          if (cancelled) return;
           const seeded = seedFromHistory(
             (hist.data ?? []) as unknown as Parameters<typeof seedFromHistory>[0],
           );
-          if (!cancelled) {
-            setStates((prev) => new Map(prev).set(harnessSessionId, seeded));
-          }
+          setStates((prev) => new Map(prev).set(harnessSessionId, seeded));
         } catch {
-          // pod warming up — live events will populate the thread
+          // pod warming up / aborted — live events will populate the thread
         }
         if (cancelled) return;
 
