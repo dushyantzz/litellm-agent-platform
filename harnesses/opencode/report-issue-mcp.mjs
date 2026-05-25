@@ -38,16 +38,16 @@ import { ProxyAgent, fetch as undiciFetch } from "undici";
 
 function resolveEnv() {
   const base_url = (process.env.LAP_BASE_URL ?? "").replace(/\/+$/, "");
-  const agent_id = process.env.AGENT_ID ?? "";
   const access_token =
     process.env.LAP_ACCESS_TOKEN ?? process.env.LAP_AUTH_TOKEN ?? "";
   const refresh_token = process.env.LAP_REFRESH_TOKEN ?? "";
   const missing = [];
   if (!base_url) missing.push("LAP_BASE_URL");
-  if (!agent_id) missing.push("AGENT_ID");
   if (!access_token) missing.push("LAP_ACCESS_TOKEN");
   if (missing.length > 0) return { env: null, missing };
-  return { env: { base_url, agent_id, access_token, refresh_token }, missing: [] };
+  // AGENT_ID is not required at boot — inline harness shares one process across
+  // agents. The agent passes its agent_id as a tool parameter instead.
+  return { env: { base_url, access_token, refresh_token }, missing: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +123,9 @@ async function callApi(env, method, url, body) {
 // ---------------------------------------------------------------------------
 
 async function callReportIssue(env, input) {
-  const url = `${env.base_url}/api/v1/managed_agents/agents/${env.agent_id}/issues`;
+  const agent_id = process.env.AGENT_ID || input.agent_id;
+  if (!agent_id) return { isError: true, text: "report_issue: agent_id required" };
+  const url = `${env.base_url}/api/v1/managed_agents/agents/${agent_id}/issues`;
   const res = await callApi(env, "POST", url, {
     title: input.title,
     body: input.body,
@@ -143,9 +145,11 @@ async function callReportIssue(env, input) {
 }
 
 async function callListIssues(env, input) {
+  const agent_id = process.env.AGENT_ID || input.agent_id;
+  if (!agent_id) return { isError: true, text: "list_issues: agent_id required" };
   const qs = new URLSearchParams({ status: input.status ?? "open" });
   if (input.severity) qs.set("severity", input.severity);
-  const url = `${env.base_url}/api/v1/managed_agents/agents/${env.agent_id}/issues?${qs}`;
+  const url = `${env.base_url}/api/v1/managed_agents/agents/${agent_id}/issues?${qs}`;
   const res = await callApi(env, "GET", url, undefined);
   if (!res.ok) {
     return { isError: true, text: `list_issues failed (HTTP ${res.status}): ${res.error ?? JSON.stringify(res.data)}` };
@@ -160,7 +164,9 @@ async function callListIssues(env, input) {
 
 async function callUpdateIssue(env, input) {
   if (!input.issue_id) return { isError: true, text: "update_issue: issue_id is required" };
-  const url = `${env.base_url}/api/v1/managed_agents/agents/${env.agent_id}/issues/${input.issue_id}`;
+  const agent_id = process.env.AGENT_ID || input.agent_id;
+  if (!agent_id) return { isError: true, text: "update_issue: agent_id required" };
+  const url = `${env.base_url}/api/v1/managed_agents/agents/${agent_id}/issues/${input.issue_id}`;
   const body = {};
   if (input.status) body.status = input.status;
   if (input.severity) body.severity = input.severity;
@@ -201,6 +207,10 @@ const TOOLS = [
           type: "string",
           description: "Session where this issue was observed — lets operators click through to the session for context.",
         },
+        agent_id: {
+          type: "string",
+          description: "Your agent_id — visible in your system prompt. Required on the inline harness where AGENT_ID env var is not set.",
+        },
       },
       required: ["title"],
     },
@@ -220,6 +230,10 @@ const TOOLS = [
           type: "string",
           enum: ["info", "warning", "error", "critical"],
           description: "Optional severity filter.",
+        },
+        agent_id: {
+          type: "string",
+          description: "Your agent_id — visible in your system prompt.",
         },
       },
     },
@@ -243,6 +257,10 @@ const TOOLS = [
           type: "string",
           enum: ["info", "warning", "error", "critical"],
           description: "New severity.",
+        },
+        agent_id: {
+          type: "string",
+          description: "Your agent_id — visible in your system prompt.",
         },
       },
       required: ["issue_id"],
