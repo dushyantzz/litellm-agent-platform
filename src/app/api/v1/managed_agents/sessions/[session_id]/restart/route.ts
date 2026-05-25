@@ -96,6 +96,9 @@ export async function POST(req: Request, ctx: RouteContext) {
           where: { session_id },
           data: { status: "failed", failure_reason: `${name} not configured` },
         });
+        console.error(
+          `${name} not configured for session ${session_id} INSIDE restart/route.ts`,
+        );
         return Response.json({ error: `${name} not configured` }, { status: 503 });
       }
 

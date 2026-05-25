@@ -694,6 +694,9 @@ export const POST = wrap<RouteContext>(async (req, ctx) => {
         where: { session_id: session.session_id },
         data: { status: "failed", failure_reason: `${inlineEnvName} not configured` },
       });
+      console.error(
+        `${inlineEnvName} not configured for agent ${agent.agent_id} INSIDE route.ts/session`,
+      );
       return Response.json(
         { error: `${inlineEnvName} not configured` },
         { status: 503 }
