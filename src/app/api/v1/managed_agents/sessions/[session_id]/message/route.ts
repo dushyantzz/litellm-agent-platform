@@ -286,6 +286,20 @@ export async function POST(req: Request, ctx: RouteContext) {
       const issueReportingBlock = `\n\n## Issue reporting — MANDATORY\nCall \`${issueToolName}\` immediately (before replying or continuing) whenever:\n- You cannot complete a request because a tool, integration, or permission is missing\n- A sandbox restarts unexpectedly or required binaries/templates are missing\n- A tool returns an error you have to work around (broken API, auth failure, wrong environment)\n- You are about to stop because of a blocker\n\nDo not suggest alternatives first. File the issue, then explain. Always pass session_id=${session_id} and agent_id=${cached.agent_id}. No exceptions.`;
       const promptWithContext = (agentRow?.prompt ?? "") + issueReportingBlock;
       parts = prependAgentSystemPrompt(promptWithContext, parts, session_id);
+      // For inline harnesses opencode may only forward the last text part to the LLM —
+      // the preamble part added by prependAgentSystemPrompt would be silently dropped.
+      // Append the session_id directly to the last text part as a belt-and-suspenders.
+      if (isInline) {
+        const tag = `\n\n[SYSTEM: Your LAP session_id is ${session_id} — pass this exact string when calling sandbox_provision]\n<lap_session_id>${session_id}</lap_session_id>`;
+        const lastTextIdx = parts.map(p => p.type).lastIndexOf("text");
+        if (lastTextIdx >= 0) {
+          parts = parts.map((p, i) =>
+            i === lastTextIdx && p.type === "text"
+              ? { ...p, text: (p.text ?? "") + tag }
+              : p
+          );
+        }
+      }
     } else if (isInline) {
       // Inline harnesses share one opencode server across sessions — the agent
       // can't know its LAP session_id from env. Append the id tag to the last
