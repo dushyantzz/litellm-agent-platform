@@ -321,8 +321,13 @@ export async function harnessSendMessage(
     parts,
     timeout_ms = DEFAULT_MESSAGE_TIMEOUT_MS,
   } = opts;
+  // Derive providerID from model prefix: "anthropic/claude-x" → {providerID:"anthropic", modelID:"claude-x"}
+  // Falls back to "litellm" for bare names (LiteLLM gateway path).
+  const slashIdx = model.indexOf("/");
+  const providerID = slashIdx > 0 ? model.slice(0, slashIdx) : "litellm";
+  const modelID = slashIdx > 0 ? model.slice(slashIdx + 1) : model;
   const body = {
-    model: { providerID: "litellm", modelID: model },
+    model: { providerID, modelID },
     parts,
   };
   const data = await postJson(

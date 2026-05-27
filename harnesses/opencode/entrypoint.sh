@@ -29,15 +29,13 @@ fi
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   INFERENCE_BASE="https://api.anthropic.com/v1"
   INFERENCE_KEY="${ANTHROPIC_API_KEY}"
+  PROVIDER_NAME="anthropic"
   BASE="$INFERENCE_BASE"
-  # Keep LITELLM_DEFAULT_MODEL as-is (e.g. "anthropic/claude-opus-4-7") —
-  # the platform sends this exact modelID in harnessSendMessage and opencode
-  # must find it in the config map. @ai-sdk/anthropic strips the provider
-  # prefix internally before calling the Anthropic API.
   echo "[entrypoint] using direct Anthropic API (model=${LITELLM_DEFAULT_MODEL})"
 else
   INFERENCE_BASE="$BASE"
   INFERENCE_KEY="${LITELLM_API_KEY}"
+  PROVIDER_NAME="litellm"
 fi
 
 # Wire LiteLLM through opencode's native Anthropic adapter, pointed at the
@@ -104,7 +102,7 @@ cat > opencode.json <<EOF
   "\$schema": "https://opencode.ai/config.json",
 ${MCP_BLOCK}
   "provider": {
-    "litellm": {
+    "${PROVIDER_NAME}": {
       "npm": "@ai-sdk/anthropic",
       "options": {
         "baseURL": "${INFERENCE_BASE}",
@@ -113,7 +111,7 @@ ${MCP_BLOCK}
       "models": ${MODELS_JSON}
     }
   },
-  "model": "litellm/${LITELLM_DEFAULT_MODEL}",
+  "model": "${PROVIDER_NAME}/${LITELLM_DEFAULT_MODEL#*/}",
   "permission": {
     "edit": "deny",
     "bash": "deny",
