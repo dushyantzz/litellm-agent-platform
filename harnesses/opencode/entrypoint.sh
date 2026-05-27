@@ -22,6 +22,23 @@ if [ -n "${REPO_URL:-}" ]; then
   git remote set-url origin "$REPO_URL" 2>/dev/null || true
 fi
 
+# When ANTHROPIC_API_KEY is set, bypass LiteLLM and hit the Anthropic API
+# directly. This avoids thinking-block replay errors (Anthropic rejects
+# historical thinking blocks accumulated in SQLite) and removes LiteLLM
+# as a dependency for inference (MCP tools still use LITELLM_API_KEY).
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  INFERENCE_BASE="https://api.anthropic.com/v1"
+  INFERENCE_KEY="${ANTHROPIC_API_KEY}"
+  # Strip provider prefix so @ai-sdk/anthropic gets bare model names
+  BARE_MODEL="${LITELLM_DEFAULT_MODEL#anthropic/}"
+  LITELLM_DEFAULT_MODEL="$BARE_MODEL"
+  BASE="$INFERENCE_BASE"
+  echo "[entrypoint] using direct Anthropic API (model=${BARE_MODEL})"
+else
+  INFERENCE_BASE="$BASE"
+  INFERENCE_KEY="${LITELLM_API_KEY}"
+fi
+
 # Wire LiteLLM through opencode's native Anthropic adapter, pointed at the
 # gateway's Anthropic Messages endpoint (BASE is already normalized to .../v1,
 # and @ai-sdk/anthropic POSTs to {baseURL}/messages → .../v1/messages).
@@ -54,6 +71,11 @@ opts_for='
     if (id|test("opus-4-7")) then {options:{thinking:{type:"adaptive",display:"summarized"},effort:"high"}}
     elif (id|test("sonnet")) or (id|test("opus")) then {options:{thinking:{type:"enabled",budgetTokens:8000}}}
     else {} end;'
+# When using direct Anthropic, disable thinking to avoid "thinking blocks
+# cannot be modified" 400 errors when replaying SQLite history.
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  opts_for='def opts(id): {};'
+fi
 MODELS_JSON=$(
   curl -fsS --max-time 10 -H "Authorization: Bearer ${LITELLM_API_KEY}" "${BASE}/models" 2>/dev/null \
     | jq -c "${opts_for} [ .data[].id | select(test(\"claude|opus|sonnet|haiku\")) ] | unique | map({ (.): opts(.) }) | add // {}" 2>/dev/null \
@@ -89,8 +111,8 @@ ${MCP_BLOCK}
     "litellm": {
       "npm": "@ai-sdk/anthropic",
       "options": {
-        "baseURL": "${BASE}",
-        "apiKey": "${LITELLM_API_KEY}"
+        "baseURL": "${INFERENCE_BASE}",
+        "apiKey": "${INFERENCE_KEY}"
       },
       "models": ${MODELS_JSON}
     }
