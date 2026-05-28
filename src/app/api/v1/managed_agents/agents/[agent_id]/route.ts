@@ -176,7 +176,7 @@ export const DELETE = wrap<RouteContext>(async (req, ctx) => {
   const { agent_id } = await ctx.params;
   const row = await prisma.agent.findUnique({ where: { agent_id } });
   if (row === null) httpError(404, `agent '${agent_id}' not found`);
-  await prisma.agent.delete({ where: { agent_id } });
   await deleteWorkspacePvc(agent_id);
+  await prisma.agent.delete({ where: { agent_id } });
   return new Response(null, { status: 204 });
 });
